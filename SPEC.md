@@ -217,20 +217,25 @@ Do NOT paste the contents of ~/.oci/config or your private key into this chat.
 **Gate 2 (before M1.5 — remote state bootstrap):**
 
 ```
-STOP. We need an Object Storage bucket for Terraform remote state before we initialize the backend.
+STOP. Before we initialize the Terraform backend, confirm you have created the following
+in the OCI Console:
 
-Please run in a separate terminal:
+  • A dedicated service user: terraform-state-user
+  • A group: TerraformStateOperators, with a policy granting only
+    manage objects and read buckets on the state bucket (not tenancy-wide)
+  • The Object Storage state bucket itself
+  • Customer Secret Keys generated for terraform-state-user
 
-  oci os ns get
-  (note the namespace string it returns)
+Customer Secret Keys inherit the permissions of the user they belong to and cannot
+be independently scoped, so they must be generated for a narrowly-permissioned service
+user rather than an admin user. The service user is manually managed because it needs
+access to the state bucket it would otherwise be stored in — a bootstrap paradox that
+Terraform remote state cannot solve for itself.
 
-Then create the bucket:
+Tell me the bucket name and Object Storage namespace when done. Then populate
+backend.hcl from backend.hcl.example and run:
 
-  oci os bucket create \
-    --name <your-chosen-bucket-name> \
-    --compartment-id <your-compartment-ocid>
-
-Tell me the bucket name and namespace when done, and I'll update backend.tf.
+  terraform init -backend-config=backend.hcl
 ```
 
 **Gate 3 (before M4 — pushing the Function image to OCIR):**

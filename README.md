@@ -58,7 +58,9 @@ oci os bucket create --name <bucket-name> --compartment-id <compartment-ocid>
 cd infra
 cp terraform.tfvars.example terraform.tfvars
 # edit terraform.tfvars with your tenancy values
-terraform init
+cp backend.hcl.example backend.hcl
+# edit backend.hcl with your state bucket name, namespace, and Customer Secret Keys
+terraform init -backend-config=backend.hcl
 terraform plan
 ```
 

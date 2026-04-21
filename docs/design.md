@@ -165,6 +165,8 @@ The full state diagram — including the rollback path when target update fails 
 
 See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
+<To be filled in at M7. Must cover: rationale for manually-managed terraform-state-user (bootstrap paradox), Customer Secret Keys scoping pattern, and partial backend configuration pattern.>
+
 ---
 
 ## 8. Observability Model
