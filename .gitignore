@@ -1,0 +1,25 @@
+# Credentials — never commit these
+*.pem
+*.key
+.oci/
+.env
+.env.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
