@@ -165,7 +165,7 @@ The full state diagram — including the rollback path when target update fails 
 
 See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
-<To be filled in at M7. Must cover: rationale for manually-managed terraform-state-user (bootstrap paradox), Customer Secret Keys scoping pattern, and partial backend configuration pattern.>
+<To be filled in at M7. Must cover: partial backend configuration pattern (backend.hcl kept out of version control) and why the OCI native backend requires no separately-managed credentials (auth flows through ~/.oci/config, same as the OCI provider).>
 
 ---
 

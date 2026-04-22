@@ -1,29 +1,21 @@
-# Remote state backend using OCI Object Storage via its S3-compatible API.
+# Remote state backend using the OCI native backend type.
 #
-# Environment-specific values (bucket, endpoint, credentials) are intentionally
-# absent from this file. They live in backend.hcl, which is gitignored.
-# Copy backend.hcl.example to backend.hcl, populate it, then initialise with:
+# Requires Terraform >= 1.12.0. Uses ~/.oci/config for authentication —
+# the same credentials as the OCI provider. No Customer Secret Keys, no
+# S3-compatible API, no separate service user required.
 #
+# Environment-specific values (bucket, namespace, region, key) live in
+# backend.hcl, which is gitignored. Copy backend.hcl.example to backend.hcl,
+# populate it, then initialise with:
+#
+#   cd infra
 #   terraform init -backend-config=backend.hcl
 #
-# The flags below are fixed for every OCI deployment and document why this backend
-# talks to OCI rather than AWS:
-#
-#   skip_*                  OCI's S3-compatible API does not expose the AWS metadata,
-#                           credential-validation, or STS endpoints that Terraform's
-#                           S3 backend probes by default. Disabling these checks is
-#                           required — they would fail unconditionally against OCI.
-#
-#   use_path_style          OCI uses path-style bucket URLs (endpoint/bucket/key),
-#                           not virtual-hosted-style (bucket.endpoint/key).
-#                           use_path_style is the Terraform 1.6+ name; the older
-#                           force_path_style alias was removed in 1.6.
+# State locking is supported natively via OCI Object Storage conditional writes.
 terraform {
-  backend "s3" {
-    skip_region_validation      = true
-    skip_credentials_validation = true
-    skip_metadata_api_check     = true
-    skip_requesting_account_id  = true
-    use_path_style              = true
+  backend "oci" {
+    # Auth reads from the DEFAULT profile in ~/.oci/config.
+    # No credentials are stored in this file or in backend.hcl.
+    config_file_profile = "DEFAULT"
   }
 }

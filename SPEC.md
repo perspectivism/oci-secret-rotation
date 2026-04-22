@@ -220,19 +220,14 @@ Do NOT paste the contents of ~/.oci/config or your private key into this chat.
 STOP. Before we initialize the Terraform backend, confirm you have created the following
 in the OCI Console:
 
-  • A dedicated service user: terraform-state-user
-  • A group: TerraformStateOperators, with a policy granting only
-    manage objects and read buckets on the state bucket (not tenancy-wide)
   • The Object Storage state bucket itself
-  • Customer Secret Keys generated for terraform-state-user
 
-Customer Secret Keys inherit the permissions of the user they belong to and cannot
-be independently scoped, so they must be generated for a narrowly-permissioned service
-user rather than an admin user. The service user is manually managed because it needs
-access to the state bucket it would otherwise be stored in — a bootstrap paradox that
-Terraform remote state cannot solve for itself.
+Authentication for the OCI native backend (backend "oci") flows through ~/.oci/config —
+the same credentials used by the OCI provider. No service user, no Customer Secret Keys,
+and no separate credential management is required.
 
-Once done, populate backend.hcl from backend.hcl.example and run:
+Once the bucket exists, populate backend.hcl from backend.hcl.example (bucket name,
+namespace, region, and key path) and run:
 
   cd infra
   terraform init -backend-config=backend.hcl
@@ -345,7 +340,7 @@ Thumbs.db
 **Deliverables:**
 - User completes OCI CLI setup per Gate 1
 - User creates Object Storage bucket per Gate 2
-- `backend.hcl` populated from `backend.hcl.example` with real bucket name, namespace, and Customer Secret Keys
+- `backend.hcl` populated from `backend.hcl.example` with real bucket name, namespace, and region
 - `terraform init -backend-config=backend.hcl` succeeds
 
 **Acceptance criteria:**

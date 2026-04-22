@@ -1,31 +1,19 @@
 # Copy this file to backend.hcl, fill in your values, and run:
+#   cd infra
 #   terraform init -backend-config=backend.hcl
 #
-# backend.hcl is gitignored — never commit it. It contains Customer Secret Key
-# credentials for the terraform-state-user service account (see SPEC.md Gate 2).
+# backend.hcl is gitignored. Unlike an S3-compatible backend, this file
+# contains no credentials — authentication is handled by ~/.oci/config.
 
 # Name of the OCI Object Storage bucket created for Terraform remote state.
-# This bucket must already exist — Terraform will not create it.
 bucket = "<your-state-bucket-name>"
 
-# OCI region identifier where the state bucket lives (e.g. us-ashburn-1).
+# OCI Object Storage namespace for your tenancy.
+# Find it with: oci os ns get
+namespace = "<your-namespace>"
+
+# OCI region where the state bucket lives (e.g. us-ashburn-1).
 region = "<your-region>"
-
-# OCI Object Storage S3-compatible endpoint for your namespace and region.
-# Format: https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
-# Find your namespace with: oci os ns get
-endpoints = {
-  s3 = "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com"
-}
-
-# Customer Secret Key ID for the terraform-state-user service account.
-# Generate in OCI Console: User profile → Customer Secret Keys → Generate Secret Key.
-# This is the key ID (visible after creation), not the secret value.
-access_key = "<customer-secret-key-id>"
-
-# Customer Secret Key value for terraform-state-user.
-# This value is shown only once at creation time — copy it immediately.
-secret_key = "<customer-secret-key-value>"
 
 # Path within the bucket for the Terraform state file.
 key = "oci-secret-rotation/terraform.tfstate"
