@@ -9,11 +9,8 @@ variable "compartment_id" {
 }
 
 variable "function_ocid" {
-  description = "OCID of the deployed rotation Function. Used in the dynamic group matching rule so that only this specific Function receives the rotation permissions. Must be updated in M5 once the Function is deployed."
+  description = "OCID of the deployed rotation Function. Used in the dynamic group matching rule so that only this specific Function receives the rotation permissions."
   type        = string
-  # Placeholder — the dynamic group rule will not match any real resource until
-  # this is replaced with the deployed Function's OCID in M5.
-  default = "ocid1.fnfunc.oc1..placeholder-update-in-m5"
 }
 
 variable "dynamic_group_name" {

@@ -64,13 +64,13 @@ module "network" {
 module "function" {
   source = "./modules/function"
 
-  compartment_id     = var.compartment_ocid
-  subnet_id          = module.network.subnet_id
-  secret_id          = module.vault.secret_id
-  log_group_id       = module.logging.log_group_id
-  tenancy_namespace  = data.oci_objectstorage_namespace.tenancy.namespace
-  region             = var.region
-  image_tag          = var.image_tag
+  compartment_id        = var.compartment_ocid
+  subnet_id             = module.network.subnet_id
+  secret_id             = module.vault.secret_id
+  log_group_id          = module.logging.log_group_id
+  tenancy_namespace     = data.oci_objectstorage_namespace.tenancy.namespace
+  region                = var.region
+  image_tag             = var.image_tag
   target_bucket_name    = module.target.bucket_name
   target_namespace      = module.target.namespace
   target_object_name    = module.target.object_name
