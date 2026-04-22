@@ -6,7 +6,7 @@ variable "compartment_id" {
 variable "log_group_display_name" {
   description = "Display name for the OCI log group that contains all rotation-related logs."
   type        = string
-  default     = "secret-rotation-demo-logs"
+  default     = "secret-rotation-logs"
 }
 
 variable "notification_topic_name" {

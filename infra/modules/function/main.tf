@@ -38,7 +38,7 @@ resource "oci_functions_application" "rotation" {
 # the image before invoking, but Terraform apply can proceed before the push.
 resource "oci_functions_function" "rotation" {
   application_id     = oci_functions_application.rotation.id
-  display_name       = "rotation-handler"
+  display_name       = "secret-rotation-handler"
   image              = local.image_url
   memory_in_mbs      = 256
   timeout_in_seconds = 120
@@ -50,7 +50,7 @@ resource "oci_functions_function" "rotation" {
 # for every call to the rotation function. Written into the shared log group
 # created by the logging module.
 resource "oci_logging_log" "function_invocation" {
-  display_name       = "rotation-function-invocation-log"
+  display_name       = "secret-rotation-invocation-log"
   log_group_id       = var.log_group_id
   log_type           = "SERVICE"
   is_enabled         = true

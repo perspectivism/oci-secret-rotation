@@ -26,7 +26,7 @@ variable "compartment_ocid" {
 variable "secret_name" {
   description = "Display name for the secret in OCI Vault. Used to identify the secret in console and CLI output."
   type        = string
-  default     = "rotation-demo-secret"
+  default     = "secret-rotation-secret"
 }
 
 variable "rotation_interval_days" {

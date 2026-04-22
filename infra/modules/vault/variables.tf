@@ -6,13 +6,13 @@ variable "compartment_id" {
 variable "vault_display_name" {
   description = "Display name for the OCI Vault resource."
   type        = string
-  default     = "secret-rotation-demo-vault"
+  default     = "secret-rotation-vault"
 }
 
 variable "key_display_name" {
   description = "Display name for the KMS master key used to encrypt the secret at rest."
   type        = string
-  default     = "secret-rotation-demo-key"
+  default     = "secret-rotation-key"
 }
 
 variable "secret_name" {

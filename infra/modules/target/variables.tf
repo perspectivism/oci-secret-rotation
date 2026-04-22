@@ -11,7 +11,7 @@ variable "namespace" {
 variable "bucket_name" {
   description = "Name of the Object Storage bucket used as the rotation target. Must be unique within the namespace."
   type        = string
-  default     = "rotation-demo-target"
+  default     = "secret-rotation-target"
 }
 
 variable "object_name" {

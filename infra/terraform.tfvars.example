@@ -15,15 +15,15 @@ user_ocid = "ocid1.user.oc1..example"
 region = "us-ashburn-1"
 
 # OCID of the compartment in which all resources will be created.
-# Create a dedicated compartment named secret-rotation-demo for isolation.
+# Create a dedicated compartment named secret-rotation for isolation.
 # Console: Identity → Compartments → Create Compartment
 compartment_ocid = "ocid1.compartment.oc1..example"
 
-# Display name for the demo secret in OCI Vault.
-secret_name = "rotation-demo-secret"
+# Display name for the secret in OCI Vault.
+secret_name = "secret-rotation-secret"
 
 # Number of days between automatic rotations.
-# 30 days is a reasonable default for a demo; adjust to match your security policy.
+# 30 days is a reasonable default; adjust to match your security policy.
 rotation_interval_days = 30
 
 # OCID of the deployed rotation Function.
