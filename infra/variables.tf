@@ -34,3 +34,9 @@ variable "rotation_interval_days" {
   type        = number
   default     = 30
 }
+
+variable "image_tag" {
+  description = "Tag of the rotation Function container image in OCIR. Override in terraform.tfvars when deploying a specific build; defaults to latest."
+  type        = string
+  default     = "latest"
+}

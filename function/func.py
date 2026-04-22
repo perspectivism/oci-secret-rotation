@@ -8,7 +8,14 @@ setting up logging, and mapping outcomes to HTTP responses.
 import io
 import json
 import logging
+import os
 import sys
+
+# The FDK loads func.py via importlib which does not add the file's directory
+# to sys.path automatically. Insert it explicitly so that rotation.py,
+# vault_client.py, and target_client.py are importable regardless of how the
+# platform configures PYTHONPATH.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fdk import response
 
@@ -74,7 +81,7 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
     Returns:
         fdk.response.Response with a JSON body and appropriate HTTP status.
     """
-    secret_id = ctx.Config.get("SECRET_OCID", "").strip()
+    secret_id = ctx.Config().get("SECRET_OCID", "").strip()
     if not secret_id:
         logger.error("SECRET_OCID not set in function config")
         return response.Response(

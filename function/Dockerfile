@@ -10,5 +10,5 @@ FROM fnproject/python:3.12
 WORKDIR /function
 COPY --from=build-stage /python /python
 ADD . /function/
-ENV PYTHONPATH=/python
+ENV PYTHONPATH=/python:/function
 ENTRYPOINT ["/python/bin/fdk", "/function/func.py", "handler"]

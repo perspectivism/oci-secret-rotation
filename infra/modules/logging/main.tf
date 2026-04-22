@@ -9,19 +9,6 @@ resource "oci_logging_log_group" "rotation" {
   description    = "Contains structured logs emitted by the secret rotation Function."
 }
 
-# Custom log that receives structured JSON output from the rotation Function.
-#
-# log_type = "CUSTOM" means the log is written to programmatically (via the
-# OCI Logging ingestion API or the Functions runtime). This is distinct from
-# SERVICE logs, which are emitted automatically by OCI services.
-# The Function application resource (modules/function/) references this log's
-# OCID in its logging_policy block — that association is made in M3/M4.
-resource "oci_logging_log" "function_log" {
-  display_name = var.function_log_display_name
-  log_group_id = oci_logging_log_group.rotation.id
-  log_type     = "CUSTOM"
-}
-
 # ONS (Oracle Notification Service) topic that receives secret rotation events.
 #
 # The Events rule below publishes to this topic; subscribers (email, HTTPS, etc.)

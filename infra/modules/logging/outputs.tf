@@ -3,11 +3,6 @@ output "log_group_id" {
   value       = oci_logging_log_group.rotation.id
 }
 
-output "function_log_id" {
-  description = "OCID of the custom Function log. Passed to the Function application's logging_policy block in modules/function/."
-  value       = oci_logging_log.function_log.id
-}
-
 output "notification_topic_id" {
   description = "OCID of the ONS notification topic. Can be used to add additional subscriptions without modifying the Events rule."
   value       = oci_ons_notification_topic.rotation_events.id

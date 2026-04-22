@@ -9,12 +9,6 @@ variable "log_group_display_name" {
   default     = "secret-rotation-demo-logs"
 }
 
-variable "function_log_display_name" {
-  description = "Display name for the custom log that receives structured output from the rotation Function."
-  type        = string
-  default     = "rotation-function-log"
-}
-
 variable "notification_topic_name" {
   description = "Name for the ONS topic that receives secret rotation events. Must be unique within the compartment."
   type        = string

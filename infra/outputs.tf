@@ -31,6 +31,21 @@ output "log_group_id" {
   value       = module.logging.log_group_id
 }
 
+output "function_id" {
+  description = "OCID of the deployed rotation function."
+  value       = module.function.function_id
+}
+
+output "application_id" {
+  description = "OCID of the Function application."
+  value       = module.function.application_id
+}
+
+output "image_url" {
+  description = "Full OCIR image URL. Use this as the target for docker tag and docker push before invoking the function."
+  value       = module.function.image_url
+}
+
 output "notification_topic_id" {
   description = "OCID of the ONS notification topic. Used to add subscriptions and to verify event delivery in M6."
   value       = module.logging.notification_topic_id

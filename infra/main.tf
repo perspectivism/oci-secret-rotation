@@ -1,9 +1,12 @@
-# Root module — wires together the vault, iam, and logging sub-modules.
+# Root module — wires together all sub-modules.
 #
 # Module call order reflects logical dependency, not Terraform execution order
 # (Terraform resolves dependencies from output/input references automatically).
-# The function module is absent here; it is added in M4 once the Function image
-# exists in OCIR and has a stable OCID to reference.
+
+# Derives the tenancy Object Storage namespace, which doubles as the OCIR registry
+# namespace. Fetched from the provider so it does not need to be repeated in
+# terraform.tfvars.
+data "oci_objectstorage_namespace" "tenancy" {}
 
 # Vault module — creates the KMS key, OCI Vault, and the secret.
 # The secret's rotation_config block is added in M5 once the Function OCID
@@ -16,14 +19,14 @@ module "vault" {
 }
 
 # IAM module — creates the dynamic group and rotation policies.
-# function_ocid defaults to a placeholder in the module; it is overridden here
-# in M5 using module.function.function_ocid once that module exists.
+# function_ocid now uses the real deployed Function OCID from the function module.
 module "iam" {
   source = "./modules/iam"
 
   tenancy_id     = var.tenancy_ocid
   compartment_id = var.compartment_ocid
   secret_name    = var.secret_name
+  function_ocid  = module.function.function_id
 }
 
 # Logging module — creates the log group, custom function log, ONS topic,
@@ -35,16 +38,24 @@ module "logging" {
   compartment_id = var.compartment_ocid
 }
 
-# -----------------------------------------------------------------------
-# M4 placeholder: function module call goes here once the Function image
-# is pushed to OCIR and modules/function/ is implemented.
-#
-# module "function" {
-#   source = "./modules/function"
-#
-#   compartment_id            = var.compartment_ocid
-#   log_group_id              = module.logging.log_group_id
-#   function_log_id           = module.logging.function_log_id
-#   ...
-# }
-# -----------------------------------------------------------------------
+# Network module — VCN, private subnet, and service gateway for the Function.
+module "network" {
+  source = "./modules/network"
+
+  compartment_id = var.compartment_ocid
+}
+
+# Function module — OCIR repository, Function application, function, and
+# invocation service log. The function image must be pushed to OCIR before
+# the function can be invoked (apply can succeed before the push).
+module "function" {
+  source = "./modules/function"
+
+  compartment_id    = var.compartment_ocid
+  subnet_id         = module.network.subnet_id
+  secret_id         = module.vault.secret_id
+  log_group_id      = module.logging.log_group_id
+  tenancy_namespace = data.oci_objectstorage_namespace.tenancy.namespace
+  region            = var.region
+  image_tag         = var.image_tag
+}

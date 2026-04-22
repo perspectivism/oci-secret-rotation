@@ -98,20 +98,21 @@ class VaultClient:
             )
             raise
 
-        pending = next(
-            (v for v in versions if "PENDING" in (v.stages or [])),
+        # Secrets with a rotation policy get PENDING; without one OCI promotes
+        # directly to CURRENT. In both cases the new version is always LATEST.
+        latest = next(
+            (v for v in versions if "LATEST" in (v.stages or [])),
             None,
         )
-        if pending is None:
+        if latest is None:
             raise RuntimeError(
-                f"no PENDING version found after update_secret for secret {secret_id}"
+                f"no LATEST version found after update_secret for secret {secret_id}"
             )
-        pending_version = pending.version_number
         logger.info(
-            "pending secret version created",
-            extra={"secret_id": secret_id, "pending_version": pending_version},
+            "new secret version created",
+            extra={"secret_id": secret_id, "version": latest.version_number, "stages": latest.stages},
         )
-        return pending_version
+        return latest.version_number
 
     def promote_to_current(self, secret_id: str, version_number: int) -> None:
         """Promote a PENDING secret version to CURRENT.
@@ -131,6 +132,14 @@ class VaultClient:
             oci.exceptions.ServiceError: On non-2xx response from Vault.
         """
         try:
+            versions = self._vaults.list_secret_versions(secret_id=secret_id).data
+            version = next((v for v in versions if v.version_number == version_number), None)
+            if version and "CURRENT" in (version.stages or []):
+                logger.info(
+                    "secret version already current, skipping promote",
+                    extra={"secret_id": secret_id, "version_number": version_number},
+                )
+                return
             self._vaults.update_secret(
                 secret_id=secret_id,
                 update_secret_details=UpdateSecretDetails(
