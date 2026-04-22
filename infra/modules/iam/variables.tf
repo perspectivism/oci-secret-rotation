@@ -27,3 +27,8 @@ variable "policy_name" {
   type        = string
   default     = "secret-rotation-policy"
 }
+
+variable "secret_name" {
+  description = "Name of the secret the rotation Function is permitted to manage. Narrows the manage secret-family policy to this single named secret rather than all secrets in the compartment."
+  type        = string
+}

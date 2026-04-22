@@ -33,10 +33,10 @@ resource "oci_identity_policy" "rotation" {
   statements = [
     # Grants the rotation Function permission to read the current secret value
     # and to create and promote new secret versions (PENDING → CURRENT).
-    # 'manage secret-family' is used here for clarity; it is broader than
-    # strictly necessary — 'read secret-bundles' + 'manage secret-versions'
-    # would be the least-privilege equivalent. Flagged for stop-gate review.
-    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to manage secret-family in compartment id ${var.compartment_id}",
+    # The 'where' condition pins this to a single named secret — the Function
+    # cannot manage any other secret in the compartment even if the dynamic
+    # group matching rule were ever broadened.
+    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to manage secret-family in compartment id ${var.compartment_id} where target.secret.name = '${var.secret_name}'",
 
     # Grants the OCI Vault scheduler service permission to look up and invoke
     # the rotation Function when the rotation_config schedule fires.
