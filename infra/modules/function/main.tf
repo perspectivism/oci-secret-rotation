@@ -24,7 +24,10 @@ resource "oci_functions_application" "rotation" {
   subnet_ids     = [var.subnet_id]
 
   config = {
-    SECRET_OCID = var.secret_id
+    SECRET_OCID      = var.secret_id
+    TARGET_BUCKET    = var.target_bucket_name
+    TARGET_NAMESPACE = var.target_namespace
+    TARGET_OBJECT    = var.target_object_name
   }
 }
 

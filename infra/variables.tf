@@ -40,3 +40,8 @@ variable "image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "function_ocid" {
+  description = "OCID of the deployed rotation Function. Used in the vault rotation_config so the Vault scheduler knows which function to invoke. Declared as a static variable rather than wired from the function module output to break the vault↔function cycle."
+  type        = string
+}

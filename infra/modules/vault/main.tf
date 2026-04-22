@@ -40,10 +40,6 @@ resource "oci_kms_key" "master_key" {
 # The initial content is a base64-encoded placeholder. The rotation Function
 # will overwrite this with a real credential on the first rotation trigger.
 #
-# rotation_config is intentionally absent here. It requires the deployed
-# Function's OCID, which is not available until M4. It will be added to this
-# resource in M5 when the full rotation wiring is completed.
-#
 # OCI Vault enforces soft-delete on secrets: a deleted secret enters
 # PENDING_DELETION state for a configurable retention window (1–30 days)
 # before permanent deletion. This provides a recovery path against accidental
@@ -58,5 +54,16 @@ resource "oci_vault_secret" "secret" {
     content_type = "BASE64"
     # Placeholder replaced on first rotation — not a real credential.
     content = base64encode("initial-placeholder-replaced-on-first-rotation")
+  }
+
+  rotation_config {
+    is_scheduled_rotation_enabled = true
+    # ISO 8601 duration — "P30D" means 30 days. Min 1 day, max 360 days.
+    rotation_interval = "P${var.rotation_interval_days}D"
+
+    target_system_details {
+      target_system_type = "FUNCTION"
+      function_id        = var.function_ocid
+    }
   }
 }

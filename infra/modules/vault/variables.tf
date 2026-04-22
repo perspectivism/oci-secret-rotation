@@ -19,3 +19,17 @@ variable "secret_name" {
   description = "Name of the secret within the Vault. Must be unique within the compartment."
   type        = string
 }
+
+variable "function_ocid" {
+  description = "OCID of the rotation Function. Used in the rotation_config target_system_details block so the Vault scheduler knows which function to invoke."
+  type        = string
+}
+
+variable "rotation_interval_days" {
+  description = "Number of days between automatic rotations. Rendered as an ISO 8601 duration (P<n>D) in the rotation_config block."
+  type        = number
+  default     = 30
+}
+
+
+

@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Design Document
 
-**Status:** Draft (M0)
-**Last updated:** 2026-04-21
+**Status:** Draft (M5)
+**Last updated:** 2026-04-22
 
 ---
 
@@ -33,7 +33,7 @@ The result is a rotation system that is auditable (every rotation event is captu
 - Admin UI or web endpoint
 - Multi-tenant isolation (single compartment is sufficient for a reference implementation)
 - Exhaustive test coverage (smoke tests and key unit tests only)
-- Real production target system (mock target is sufficient to demonstrate the pattern)
+- Real production target system (Object Storage demo target is sufficient to demonstrate the pattern)
 
 ---
 
@@ -59,7 +59,7 @@ graph TD
             FNA --> FN
         end
 
-        MT["Mock Target<br/>(in-memory / Object Storage stub)"]
+        MT["Object Storage bucket<br/>(demo rotation target)"]
 
         subgraph obs["Observability"]
             LG["Log Group<br/>+ Function logs"]
@@ -139,9 +139,11 @@ Software-protected keys are used for this reference implementation. HSM-backed (
 
 Multi-compartment separation (e.g., separating the Vault from the Function) adds policy complexity without demonstrating additional patterns. A single compartment is sufficient for a reference implementation. Cross-compartment patterns are documented as future work in §10.
 
-### Mock target
+### Demo rotation target (Object Storage)
 
-Rotating against a real database or third-party API introduces external dependencies, costs, and setup complexity that distract from the pattern being demonstrated. A mock target that accepts a credential update call demonstrates the integration point without the noise.
+Rotating against a real database or third-party API introduces external dependencies, costs, and setup complexity that distract from the pattern being demonstrated. Instead, the Function writes the new credential value to a private OCI Object Storage object after each rotation. This makes the result immediately observable (`oci os object get` or the console) without requiring an external system.
+
+> **This is not a production pattern.** Writing credential values to Object Storage defeats the purpose of Vault as a secrets store. In a real deployment, `target_client.py` is replaced with an implementation that calls the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for an external service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
 ---
 

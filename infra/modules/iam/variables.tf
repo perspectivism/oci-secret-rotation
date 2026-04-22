@@ -32,3 +32,8 @@ variable "secret_name" {
   description = "Name of the secret the rotation Function is permitted to manage. Narrows the manage secret-family policy to this single named secret rather than all secrets in the compartment."
   type        = string
 }
+
+variable "target_bucket_name" {
+  description = "Name of the Object Storage bucket used as the rotation target. Used to scope the object-write policy to this bucket only."
+  type        = string
+}

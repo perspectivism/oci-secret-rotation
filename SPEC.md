@@ -414,20 +414,25 @@ Thumbs.db
 
 ### M5 — Wire up rotation
 
-**Goal:** Vault's native rotation scheduler invokes the Function; new secret versions are created automatically.
+**Goal:** Vault's native rotation scheduler invokes the Function; new secret versions are created automatically and the credential is observable in a real OCI target.
 
 **Deliverables:**
 - Secret resource updated with `rotation_config` targeting the Function OCID
 - Dynamic group rule updated to match the deployed Function's OCID
 - Policies finalized:
   - Dynamic group can `use secret-family` in compartment
+  - Dynamic group can `manage objects` in the target bucket
   - `vaultsecret` service principal can invoke the Function
+- Object Storage bucket provisioned as the rotation target (simulates a credential store)
+- `ObjectStorageTargetClient` implemented — `update_credential` writes the new credential value to a known object in the bucket
+- Function config updated with bucket name, namespace, and object name
+- `MockTargetClient` replaced by `ObjectStorageTargetClient` in `func.py`
 - Manual rotation trigger (`oci vault secret rotate`) executes successfully
-- New secret version created; mock target reflects new credential
+- New secret version created; target object in Object Storage reflects new credential
 
 **Acceptance criteria:**
 - `oci vault secret list-versions` shows the new version
-- Mock target query returns the new credential
+- `oci os object get` on the target object returns the new credential value
 - OCI Logging captures the rotation event
 
 **Stop gate:** Verify the full flow with user. This is the core demonstration of the system.

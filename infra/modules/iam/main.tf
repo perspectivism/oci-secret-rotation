@@ -46,5 +46,10 @@ resource "oci_identity_policy" "rotation" {
     # without use, OCI rejects the invocation even if the endpoint is known.
     "Allow service vaultsecret to read fn-function in compartment id ${var.compartment_id}",
     "Allow service vaultsecret to use fn-invocation in compartment id ${var.compartment_id}",
+
+    # Grants the rotation Function permission to write the new credential to the
+    # Object Storage target bucket. Scoped to the specific bucket by name so the
+    # Function cannot access any other bucket in the compartment.
+    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to manage objects in compartment id ${var.compartment_id} where target.bucket.name = '${var.target_bucket_name}'",
   ]
 }

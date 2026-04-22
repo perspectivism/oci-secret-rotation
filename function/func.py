@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fdk import response
 
 from rotation import rotate
-from target_client import MockTargetClient
+from target_client import ObjectStorageTargetClient
 from vault_client import VaultClient
 
 # Standard LogRecord attributes excluded from the JSON extra-fields pass-through.
@@ -81,18 +81,33 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
     Returns:
         fdk.response.Response with a JSON body and appropriate HTTP status.
     """
-    secret_id = ctx.Config().get("SECRET_OCID", "").strip()
-    if not secret_id:
-        logger.error("SECRET_OCID not set in function config")
+    cfg = ctx.Config()
+    secret_id = cfg.get("SECRET_OCID", "").strip()
+    target_bucket = cfg.get("TARGET_BUCKET", "").strip()
+    target_namespace = cfg.get("TARGET_NAMESPACE", "").strip()
+    target_object = cfg.get("TARGET_OBJECT", "").strip()
+
+    missing = [k for k, v in {
+        "SECRET_OCID": secret_id,
+        "TARGET_BUCKET": target_bucket,
+        "TARGET_NAMESPACE": target_namespace,
+        "TARGET_OBJECT": target_object,
+    }.items() if not v]
+    if missing:
+        logger.error("missing required function config keys", extra={"missing": missing})
         return response.Response(
             ctx,
-            response_data=json.dumps({"error": "SECRET_OCID not configured"}),
+            response_data=json.dumps({"error": f"missing config: {missing}"}),
             headers={"Content-Type": "application/json"},
             status_code=500,
         )
 
     vault = VaultClient()
-    target = MockTargetClient()
+    target = ObjectStorageTargetClient(
+        namespace=target_namespace,
+        bucket_name=target_bucket,
+        object_name=target_object,
+    )
 
     try:
         rotate(secret_id=secret_id, vault_client=vault, target_client=target)

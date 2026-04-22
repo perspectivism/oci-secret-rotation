@@ -39,3 +39,18 @@ variable "image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "target_bucket_name" {
+  description = "Name of the Object Storage bucket the function writes the rotated credential to. Injected as TARGET_BUCKET in the function config."
+  type        = string
+}
+
+variable "target_namespace" {
+  description = "Object Storage namespace. Injected as TARGET_NAMESPACE in the function config."
+  type        = string
+}
+
+variable "target_object_name" {
+  description = "Object name within the target bucket. Injected as TARGET_OBJECT in the function config."
+  type        = string
+}

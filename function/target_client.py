@@ -1,13 +1,21 @@
-"""Target client interface and in-memory mock implementation.
+"""Target client interface and Object Storage / mock implementations.
 
-In a real deployment, replace MockTargetClient with a concrete implementation
-that calls the target system's credential-rotation API (e.g. ALTER USER for a
-database, or a vendor's key-rotation endpoint). Only target_client.py changes —
-rotation.py and vault_client.py are target-agnostic.
+ObjectStorageTargetClient is the demo target: it writes the new credential as
+a plain-text object to a private OCI bucket after each rotation, making the
+update immediately observable via console or CLI.
+
+In a production deployment, substitute a concrete implementation that calls the
+real target's credential API (e.g. ALTER USER for a database). Only this file
+changes — rotation.py and vault_client.py are target-agnostic.
 """
 
 import abc
 import logging
+from typing import Optional
+
+import oci
+from oci.exceptions import ServiceError
+from oci.object_storage import ObjectStorageClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +43,65 @@ class TargetClient(abc.ABC):
         Raises:
             TargetUpdateError: If the target rejects or cannot apply the update.
         """
+
+
+class ObjectStorageTargetClient(TargetClient):
+    """Writes the rotated credential to a private Object Storage object.
+
+    Serves as a demo target: after each rotation the new credential is
+    immediately readable via `oci os object get` or the OCI console.
+    This is NOT a production pattern — real targets are databases, APIs, or
+    application config stores, not object storage.
+
+    Authenticates via Resource Principal (the deployed Function's identity).
+    """
+
+    def __init__(
+        self,
+        namespace: str,
+        bucket_name: str,
+        object_name: str,
+        signer: Optional[object] = None,
+    ) -> None:
+        if signer is None:
+            signer = oci.auth.signers.get_resource_principals_signer()
+        self._client = ObjectStorageClient(config={}, signer=signer)
+        self._namespace = namespace
+        self._bucket_name = bucket_name
+        self._object_name = object_name
+
+    def update_credential(self, new_value: str, current_value: str = "") -> None:
+        """Overwrite the target object with the new credential value.
+
+        Args:
+            new_value: New credential string to store.
+            current_value: Unused — Object Storage overwrites unconditionally.
+
+        Raises:
+            TargetUpdateError: If the put_object call fails.
+        """
+        try:
+            self._client.put_object(
+                namespace_name=self._namespace,
+                bucket_name=self._bucket_name,
+                object_name=self._object_name,
+                put_object_body=new_value.encode(),
+            )
+        except ServiceError as exc:
+            logger.error(
+                "failed to write credential to object storage",
+                extra={
+                    "bucket": self._bucket_name,
+                    "object": self._object_name,
+                    "status": exc.status,
+                    "code": exc.code,
+                },
+            )
+            raise TargetUpdateError(str(exc)) from exc
+        logger.info(
+            "target credential updated",
+            extra={"bucket": self._bucket_name, "object": self._object_name},
+        )
 
 
 class MockTargetClient(TargetClient):

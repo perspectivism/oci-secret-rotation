@@ -25,3 +25,14 @@ secret_name = "rotation-demo-secret"
 # Number of days between automatic rotations.
 # 30 days is a reasonable default for a demo; adjust to match your security policy.
 rotation_interval_days = 30
+
+# OCID of the deployed rotation Function.
+# Used in the vault secret's rotation_config so the Vault scheduler knows which
+# function to invoke. This cannot be wired from the function module output because
+# the vault secret and function have a circular dependency (vault needs the function
+# OCID; the function app needs the secret OCID). Supplying it here as a static value
+# breaks the cycle. The OCID is stable — it only changes if the function is destroyed
+# and recreated, in which case update this value and re-run terraform apply.
+# Console: Developer Services → Functions → Applications → <app> → <function> → OCID
+# CLI: oci fn function list --application-id <app-ocid> --query 'data[0].id'
+function_ocid = "ocid1.fnfunc.oc1..example"
