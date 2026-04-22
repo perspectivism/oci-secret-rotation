@@ -106,10 +106,10 @@ sequenceDiagram
     FN->>VW: GetSecretBundle (read current version)
     VW-->>FN: current credential value
     FN->>FN: generate new credential
+    FN->>VW: CreateSecretVersion(new value, stage=PENDING)
+    VW-->>FN: pending version number
     FN->>MT: UpdateCredential(new value)
     MT-->>FN: success
-    FN->>VW: CreateSecretVersion(new value, stage=PENDING)
-    VW-->>FN: new version OCID
     FN->>VW: UpdateSecretVersionStage(PENDING → CURRENT)
     VW-->>FN: success
     VW--)LG: secret-version-created event
@@ -117,7 +117,7 @@ sequenceDiagram
     Note over VW: Previous CURRENT version<br/>moves to PREVIOUS (retained for rollback)
 ```
 
-**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). The critical case — target update succeeds but Vault write fails — results in a new credential that the target accepts but that Vault does not yet know about. The recovery path is to re-trigger rotation; the Function detects the pending version and retries the promote step.
+**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) CreateSecretVersion fails — target untouched, state consistent, safe to retry; (2) UpdateCredential fails after PENDING created — CURRENT unchanged, target consistent with CURRENT, re-trigger creates a fresh PENDING; (3) UpdateSecretVersionStage fails after target update — target holds new credential but CURRENT still reflects old, re-trigger recovers by overwriting both.
 
 ---
 
