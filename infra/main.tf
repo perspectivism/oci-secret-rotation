@@ -24,11 +24,12 @@ module "vault" {
 module "iam" {
   source = "./modules/iam"
 
-  tenancy_id         = var.tenancy_ocid
-  compartment_id     = var.compartment_ocid
-  secret_name        = var.secret_name
-  function_ocid      = module.function.function_id
-  target_bucket_name = module.target.bucket_name
+  tenancy_id            = var.tenancy_ocid
+  compartment_id        = var.compartment_ocid
+  secret_name           = var.secret_name
+  function_ocid         = module.function.function_id
+  target_bucket_name    = module.target.bucket_name
+  notification_topic_id = module.logging.notification_topic_id
 }
 
 # Target module — private Object Storage bucket that receives the rotated
@@ -46,7 +47,8 @@ module "target" {
 module "logging" {
   source = "./modules/logging"
 
-  compartment_id = var.compartment_ocid
+  compartment_id        = var.compartment_ocid
+  notification_endpoint = var.notification_endpoint
 }
 
 # Network module — VCN, private subnet, and service gateway for the Function.
@@ -69,7 +71,8 @@ module "function" {
   tenancy_namespace  = data.oci_objectstorage_namespace.tenancy.namespace
   region             = var.region
   image_tag          = var.image_tag
-  target_bucket_name = module.target.bucket_name
-  target_namespace   = module.target.namespace
-  target_object_name = module.target.object_name
+  target_bucket_name    = module.target.bucket_name
+  target_namespace      = module.target.namespace
+  target_object_name    = module.target.object_name
+  notification_topic_id = module.logging.notification_topic_id
 }

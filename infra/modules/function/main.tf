@@ -28,6 +28,7 @@ resource "oci_functions_application" "rotation" {
     TARGET_BUCKET    = var.target_bucket_name
     TARGET_NAMESPACE = var.target_namespace
     TARGET_OBJECT    = var.target_object_name
+    ONS_TOPIC_ID     = var.notification_topic_id
   }
 }
 

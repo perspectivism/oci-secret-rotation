@@ -11,6 +11,10 @@ import logging
 import os
 import sys
 
+import oci
+from oci.ons import NotificationDataPlaneClient
+from oci.ons.models import MessageDetails
+
 # The FDK loads func.py via importlib which does not add the file's directory
 # to sys.path automatically. Insert it explicitly so that rotation.py,
 # vault_client.py, and target_client.py are importable regardless of how the
@@ -86,12 +90,14 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
     target_bucket = cfg.get("TARGET_BUCKET", "").strip()
     target_namespace = cfg.get("TARGET_NAMESPACE", "").strip()
     target_object = cfg.get("TARGET_OBJECT", "").strip()
+    ons_topic_id = cfg.get("ONS_TOPIC_ID", "").strip()
 
     missing = [k for k, v in {
         "SECRET_OCID": secret_id,
         "TARGET_BUCKET": target_bucket,
         "TARGET_NAMESPACE": target_namespace,
         "TARGET_OBJECT": target_object,
+        "ONS_TOPIC_ID": ons_topic_id,
     }.items() if not v]
     if missing:
         logger.error("missing required function config keys", extra={"missing": missing})
@@ -125,6 +131,22 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
             }),
             headers={"Content-Type": "application/json"},
             status_code=500,
+        )
+
+    try:
+        signer = oci.auth.signers.get_resource_principals_signer()
+        ons = NotificationDataPlaneClient(config={}, signer=signer)
+        ons.publish_message(
+            topic_id=ons_topic_id,
+            message_details=MessageDetails(
+                title="Secret rotation completed",
+                body=json.dumps({"secret_id": secret_id, "status": "ok"}),
+            ),
+        )
+    except Exception as exc:
+        logger.warning(
+            "rotation succeeded but notification failed",
+            extra={"secret_id": secret_id, "error": str(exc)},
         )
 
     return response.Response(

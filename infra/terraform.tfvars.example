@@ -36,3 +36,10 @@ rotation_interval_days = 30
 # Console: Developer Services → Functions → Applications → <app> → <function> → OCID
 # CLI: oci fn function list --application-id <app-ocid> --query 'data[0].id'
 function_ocid = "ocid1.fnfunc.oc1..example"
+
+# Email address or HTTPS URL for rotation event notifications via ONS.
+# After terraform apply, OCI will send a subscription confirmation email —
+# you must click the link before notifications are delivered.
+# For HTTPS delivery (Slack, PagerDuty), set protocol in the logging module
+# and provide the webhook URL here instead.
+notification_endpoint = "you@example.com"

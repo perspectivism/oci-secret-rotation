@@ -51,5 +51,9 @@ resource "oci_identity_policy" "rotation" {
     # Object Storage target bucket. Scoped to the specific bucket by name so the
     # Function cannot access any other bucket in the compartment.
     "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to manage objects in compartment id ${var.compartment_id} where target.bucket.name = '${var.target_bucket_name}'",
+
+    # Grants the rotation Function permission to publish messages to ONS topics
+    # in this compartment so it can send a notification after each successful rotation.
+    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to use ons-topics in compartment id ${var.compartment_id}",
   ]
 }

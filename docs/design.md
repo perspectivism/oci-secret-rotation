@@ -63,15 +63,13 @@ graph TD
 
         subgraph obs["Observability"]
             LG["Log Group<br/>+ Function logs"]
-            EV["Events Rule<br/>(secret version created)"]
-            NT["Notifications Topic"]
+            NT["Notifications Topic<br/>(ONS)"]
         end
 
         SEC -- "invokes on schedule" --> FN
         FN -- "rotates credential on" --> MT
         FN -- "writes new version to" --> SEC
-        SEC -- "emits event" --> EV
-        EV --> NT
+        FN -- "publishes notification to" --> NT
         FN -- "structured logs" --> LG
         DG -. "Resource Principal auth" .-> FN
         POL -. "governs" .-> DG
@@ -88,7 +86,7 @@ graph TD
 
 **IAM dynamic group + policies.** The Function's OCID is matched by a dynamic group rule. Two policy statements grant: (1) the dynamic group permission to read and write secrets in the compartment, and (2) the `vaultsecret` service principal permission to invoke the Function. Both policies are compartment-scoped.
 
-**OCI Logging + Events.** The Function emits structured JSON logs to OCI Logging. An Events rule subscribes to `com.oraclecloud.vaultsecret.createsecretversion` and forwards to a Notifications topic. This gives both real-time alerting and a queryable audit trail.
+**OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email (or HTTPS) notification. OCI Events Service does not expose secret version creation events — only Customer Secret Key operations are available — so direct publish from the Function is used instead.
 
 ---
 
@@ -176,11 +174,11 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 **What is logged:**
 - Every Function invocation (start, success, failure) via structured JSON to OCI Logging
 - Every Vault API call is captured in OCI Audit automatically (cannot be disabled)
-- Secret version creation events via OCI Events → Notifications
 
 **What is alerted:**
-- Secret version creation events trigger a Notifications topic (email or HTTPS endpoint)
+- The Function publishes directly to an ONS topic after each successful rotation; subscribers receive an email or HTTPS notification
 - Function invocation failures surface in OCI Logging and can be queried or alerted on
+- Note: OCI Events Service does not expose secret version creation events (only Customer Secret Key operations are available), so event-driven notification is not used
 
 **How to investigate:** See [docs/runbook.md](runbook.md) for exact CLI commands to query logs, list secret versions, and reconstruct the sequence of events after a rotation.
 

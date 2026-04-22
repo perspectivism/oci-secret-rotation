@@ -16,13 +16,7 @@ variable "notification_topic_name" {
 }
 
 variable "notification_endpoint" {
-  description = "Email address or HTTPS URL that receives rotation event notifications via the ONS subscription. Set before enabling the events rule in M6."
+  description = "Email address or HTTPS URL that receives rotation event notifications via the ONS subscription."
   type        = string
   default     = "placeholder@example.com"
-}
-
-variable "events_rule_name" {
-  description = "Display name for the Events rule that fires on secret version creation."
-  type        = string
-  default     = "secret-version-created-rule"
 }

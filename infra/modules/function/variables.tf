@@ -54,3 +54,8 @@ variable "target_object_name" {
   description = "Object name within the target bucket. Injected as TARGET_OBJECT in the function config."
   type        = string
 }
+
+variable "notification_topic_id" {
+  description = "OCID of the ONS topic the function publishes a message to after a successful rotation. Injected as ONS_TOPIC_ID in the function config."
+  type        = string
+}

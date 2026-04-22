@@ -35,35 +35,3 @@ resource "oci_ons_subscription" "rotation_events" {
   endpoint       = var.notification_endpoint
 }
 
-# Events rule that fires when OCI Vault creates a new secret version.
-#
-# is_enabled = false keeps this rule inactive until the full rotation flow is
-# verified end-to-end in M6. Enabling a rule before the Function and Vault are
-# wired together would produce spurious notifications on every manual secret
-# operation during development.
-#
-# The condition matches the canonical secret version creation event type.
-# It can be narrowed in M6 to filter by specific secret OCID if needed
-# (add a data.additionalDetails.secretId condition).
-resource "oci_events_rule" "secret_version_created" {
-  compartment_id = var.compartment_id
-  display_name   = var.events_rule_name
-  description    = "Publishes to the rotation events topic whenever a new secret version is created. Enabled in M6."
-  is_enabled     = false
-
-  condition = jsonencode({
-    eventType = ["com.oraclecloud.vaultsecret.createsecretversion"]
-    data      = {}
-  })
-
-  actions {
-    actions {
-      # ONS action publishes the event payload to the notification topic.
-      # is_enabled mirrors the rule-level flag so no notifications fire
-      # until M6 explicitly enables both.
-      action_type = "ONS"
-      is_enabled  = false
-      topic_id    = oci_ons_notification_topic.rotation_events.id
-    }
-  }
-}

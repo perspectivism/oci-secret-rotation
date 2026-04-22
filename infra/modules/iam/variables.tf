@@ -37,3 +37,8 @@ variable "target_bucket_name" {
   description = "Name of the Object Storage bucket used as the rotation target. Used to scope the object-write policy to this bucket only."
   type        = string
 }
+
+variable "notification_topic_id" {
+  description = "OCID of the ONS topic the function publishes to after rotation. Used to scope the ONS publish policy to this topic only."
+  type        = string
+}

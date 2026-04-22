@@ -444,13 +444,17 @@ Thumbs.db
 **Goal:** Rotation events produce a clear, queryable audit trail.
 
 **Deliverables:**
-- Events rule subscribing to secret version creation events
-- Notifications topic (email or HTTPS) that receives rotation events
+- Rotation Function publishes directly to ONS topic after each successful rotation
+  (OCI Events Service does not support secret version creation events — only
+  Customer Secret Key operations are exposed; direct publish is more reliable)
+- ONS email subscription confirmed and receiving rotation notifications
+- IAM policy scoping the Function's ONS publish permission to the specific topic
 - Log search queries documented in runbook
-- Verification: trigger another rotation, confirm the full chain fires
+- Verification: trigger another rotation, confirm email received, OCI Logging entry visible
 
 **Acceptance criteria:**
-- Audit trail shows: rotation triggered → Function invoked → target updated → new version created
+- Email notification arrives after `oci vault secret rotate`
+- OCI Logging shows the structured rotation log entry
 - Runbook contains the exact CLI commands to verify each step
 
 **Stop gate:** Demo the full audit trail to user.

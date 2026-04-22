@@ -50,3 +50,18 @@ output "notification_topic_id" {
   description = "OCID of the ONS notification topic. Used to add subscriptions and to verify event delivery in M6."
   value       = module.logging.notification_topic_id
 }
+
+output "bucket_name" {
+  description = "Name of the Object Storage target bucket."
+  value       = module.target.bucket_name
+}
+
+output "object_name" {
+  description = "Object name within the target bucket that holds the current credential."
+  value       = module.target.object_name
+}
+
+output "namespace" {
+  description = "OCI Object Storage namespace for the tenancy."
+  value       = module.target.namespace
+}

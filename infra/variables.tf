@@ -45,3 +45,8 @@ variable "function_ocid" {
   description = "OCID of the deployed rotation Function. Used in the vault rotation_config so the Vault scheduler knows which function to invoke. Declared as a static variable rather than wired from the function module output to break the vault↔function cycle."
   type        = string
 }
+
+variable "notification_endpoint" {
+  description = "Email address or HTTPS URL that receives rotation event notifications via the ONS subscription. Must be confirmed via the subscription confirmation email before delivery begins."
+  type        = string
+}
