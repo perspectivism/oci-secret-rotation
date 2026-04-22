@@ -194,9 +194,71 @@ Do not delete `CURRENT` or `PENDING` versions — only `PREVIOUS` and `DEPRECATE
 
 ---
 
-## 5. Full Destroy
+## 5. Update the Function Code
+
+Use this when the rotation Function image needs to be rebuilt and redeployed — for example, after a bug fix or dependency update.
+
+**Step 1 — Build and push the new image:**
+
+```bash
+source scripts/set-env.sh
+IMAGE_URL=$(cd infra && terraform output -raw image_url)
+cd function
+docker build -t "$IMAGE_URL" .
+docker push "$IMAGE_URL"
+```
+
+**Step 2 — Force OCI Functions to pull the new image:**
+
+OCI Functions caches the image on the first cold start. Pushing a new image to the same tag does not automatically cause the running function to use it. Force a fresh pull with:
+
+```bash
+oci fn function update \
+  --function-id $FUNCTION_ID \
+  --image "$IMAGE_URL"
+```
+
+This touches the function resource and causes OCI to pull the image on the next invocation.
+
+**Step 3 — Verify the update:**
+
+```bash
+oci fn function invoke \
+  --function-id $FUNCTION_ID \
+  --body "" \
+  --file "-"
+```
+
+A successful rotation returns `{"status": "ok", ...}`. If the response is an error, check OCI Logging for the stack trace (see §2 — Investigate a Failure).
+
+---
+
+## 6. Full Destroy
 
 Tears down all resources created by Terraform.
+
+**Step 1 — Disable auto-rotation on the secret (required before destroy):**
+
+OCI will not schedule a secret for deletion while auto-rotation is enabled. Disable it first:
+
+```bash
+oci vault secret update \
+  --secret-id $SECRET_OCID \
+  --rotation-config "{\"isScheduledRotationEnabled\": false, \"rotationInterval\": \"P30D\", \"targetSystemDetails\": {\"targetSystemType\": \"FUNCTION\", \"functionId\": \"$FUNCTION_ID\"}}"
+```
+
+Note: OCI requires `targetSystemDetails` to be present even when disabling rotation — omitting it returns a 400 error.
+
+**Step 2 — Empty the target bucket (required before destroy):**
+
+```bash
+oci os object bulk-delete \
+  --namespace $NAMESPACE \
+  --bucket-name $BUCKET_NAME \
+  --force
+```
+
+**Step 3 — Destroy:**
 
 ```bash
 cd infra && terraform destroy
@@ -225,11 +287,4 @@ cd infra && terraform destroy
   oci artifacts container image delete --image-id $IMAGE_DIGEST --force
   ```
 
-- The Object Storage bucket will fail to destroy if it contains objects. Empty it first:
-
-  ```bash
-  oci os object bulk-delete \
-    --namespace $NAMESPACE \
-    --bucket-name $BUCKET_NAME \
-    --force
-  ```
+- The Object Storage bucket must be empty before `terraform destroy` can remove it — Step 2 above handles this.

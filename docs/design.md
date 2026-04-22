@@ -1,6 +1,6 @@
 # OCI Secret Lifecycle Service — Design Document
 
-**Status:** Draft (M5)
+**Status:** Accepted (M7)
 **Last updated:** 2026-04-22
 
 ---
@@ -41,7 +41,7 @@ The result is a rotation system that is auditable (every rotation event is captu
 
 ```mermaid
 graph TD
-    subgraph compartment["Compartment: secret-rotation-demo"]
+    subgraph compartment["Compartment: secret-rotation"]
         subgraph iam["IAM"]
             DG["Dynamic Group<br/>(matches Function OCID)"]
             POL["Policies<br/>• DG can use secret-family<br/>• vaultsecret can invoke Function"]
@@ -59,7 +59,7 @@ graph TD
             FNA --> FN
         end
 
-        MT["Object Storage bucket<br/>(demo rotation target)"]
+        MT["Object Storage bucket<br/>(rotation target)"]
 
         subgraph obs["Observability"]
             LG["Log Group<br/>+ Function logs"]
@@ -82,7 +82,7 @@ graph TD
 
 **OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, updates the mock target, then writes a new pending version to Vault and promotes it to current. It authenticates to OCI APIs using Resource Principal — the Function's OCID is the credential.
 
-**Mock target.** A stub that simulates a downstream service accepting a credential update. In a real deployment this would be replaced by a database password change, an API key rotation call, or a similar operation. The pattern is identical regardless of target.
+**Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
 **IAM dynamic group + policies.** The Function's OCID is matched by a dynamic group rule. Two policy statements grant: (1) the dynamic group permission to read and write secrets in the compartment, and (2) the `vaultsecret` service principal permission to invoke the Function. Both policies are compartment-scoped.
 
@@ -96,21 +96,22 @@ graph TD
 sequenceDiagram
     participant VS as OCI Vault Scheduler
     participant FN as Rotation Function
-    participant MT as Mock Target
     participant VW as Vault (write)
+    participant OS as Object Storage Target
+    participant ONS as ONS Topic
     participant LG as OCI Logging
 
     VS->>FN: invoke (rotation trigger)
     FN->>VW: GetSecretBundle (read current version)
     VW-->>FN: current credential value
     FN->>FN: generate new credential
-    FN->>VW: CreateSecretVersion(new value, stage=PENDING)
-    VW-->>FN: pending version number
-    FN->>MT: UpdateCredential(new value)
-    MT-->>FN: success
-    FN->>VW: UpdateSecretVersionStage(PENDING → CURRENT)
+    FN->>VW: update_secret (new value → stage LATEST/PENDING)
+    VW-->>FN: new version number
+    FN->>OS: put_object (new credential value)
+    OS-->>FN: 200 OK
+    FN->>VW: update_secret (current_version_number → CURRENT)
     VW-->>FN: success
-    VW--)LG: secret-version-created event
+    FN--)ONS: publish_message (rotation complete)
     FN--)LG: structured rotation log entry
     Note over VW: Previous CURRENT version<br/>moves to PREVIOUS (retained for rollback)
 ```
@@ -163,9 +164,9 @@ The full state diagram — including the rollback path when target update fails 
 
 **Secret version retention.** Vault retains previous versions (configurable, default two versions). This protects against accidental deletion and provides a rollback path. Soft-delete on the secret itself adds a further recovery window before permanent deletion.
 
-See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
+**Terraform state security.** Remote state is stored in OCI Object Storage using the OCI native backend (`backend "oci"`). The backend configuration is split: non-sensitive values (bucket name, namespace, region, key path) live in `backend.hcl`, which is `.gitignore`d and never committed. The OCI native backend authenticates through `~/.oci/config` — the same API key used by the OCI Terraform provider — so no separately-managed backend credential (Customer Secret Key, access key, or service account key) is required or created.
 
-<To be filled in at M7. Must cover: partial backend configuration pattern (backend.hcl kept out of version control) and why the OCI native backend requires no separately-managed credentials (auth flows through ~/.oci/config, same as the OCI provider).>
+See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 ---
 

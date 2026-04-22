@@ -12,15 +12,17 @@ authenticated via Resource Principal (no long-lived credentials anywhere).
 graph TD
     VS["OCI Vault<br/>(Secret + rotation schedule)"]
     FN["OCI Function<br/>(Python rotation handler)"]
-    MT["Mock Target<br/>(stub service)"]
-    LG["OCI Logging<br/>+ Events"]
+    OS["Object Storage Bucket<br/>(rotation target)"]
+    LG["OCI Logging"]
+    ONS["ONS Topic<br/>(email / webhook)"]
     DG["IAM Dynamic Group<br/>+ Policies"]
 
     VS -- "invokes on schedule" --> FN
-    FN -- "rotates credential" --> MT
+    FN -- "writes new credential" --> OS
     FN -- "writes new version" --> VS
-    VS -- "version-created event" --> LG
-    DG -- "Resource Principal auth" --> FN
+    FN -- "publishes notification" --> ONS
+    FN -- "structured logs" --> LG
+    DG -. "Resource Principal auth" .-> FN
 ```
 
 > **Note:** This diagram is a simplified view. See [docs/design.md](docs/design.md) for the detailed architecture including compartment boundaries and IAM principals.
@@ -57,9 +59,11 @@ oci os bucket create --name <bucket-name> --compartment-id <compartment-ocid>
 ```bash
 cd infra
 cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars with your tenancy values
+# Required: tenancy_ocid, user_ocid, region, compartment_ocid,
+#           function_ocid, notification_endpoint
+# Optional (have defaults): secret_name, rotation_interval_days
 cp backend.hcl.example backend.hcl
-# edit backend.hcl with your state bucket name, namespace, and Customer Secret Keys
+# Required: bucket (state bucket name), namespace, region
 terraform init -backend-config=backend.hcl
 terraform plan
 ```
@@ -74,9 +78,10 @@ terraform apply
 
 ```bash
 # docker login to OCIR first — see docs/runbook.md
+IMAGE_URL=$(cd infra && terraform output -raw image_url)
 cd function
-docker build -t <region>.ocir.io/<namespace>/secret-rotation:latest .
-docker push <region>.ocir.io/<namespace>/secret-rotation:latest
+docker build -t "$IMAGE_URL" .
+docker push "$IMAGE_URL"
 cd ../infra && terraform apply
 ```
 
