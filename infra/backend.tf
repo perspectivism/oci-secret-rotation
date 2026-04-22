@@ -14,19 +14,16 @@
 #                           S3 backend probes by default. Disabling these checks is
 #                           required — they would fail unconditionally against OCI.
 #
-#   force_path_style /      OCI uses path-style bucket URLs (endpoint/bucket/key),
-#   use_path_style          not virtual-hosted-style (bucket.endpoint/key).
-#                           Both flag names are included: force_path_style is the
-#                           pre-1.6 name; use_path_style is the 1.6+ name.
-#                           Terraform merges duplicate terraform{} blocks across
-#                           files, so both can coexist safely.
+#   use_path_style          OCI uses path-style bucket URLs (endpoint/bucket/key),
+#                           not virtual-hosted-style (bucket.endpoint/key).
+#                           use_path_style is the Terraform 1.6+ name; the older
+#                           force_path_style alias was removed in 1.6.
 terraform {
   backend "s3" {
     skip_region_validation      = true
     skip_credentials_validation = true
     skip_metadata_api_check     = true
     skip_requesting_account_id  = true
-    force_path_style            = true
     use_path_style              = true
   }
 }

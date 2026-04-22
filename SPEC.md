@@ -232,9 +232,9 @@ user rather than an admin user. The service user is manually managed because it 
 access to the state bucket it would otherwise be stored in — a bootstrap paradox that
 Terraform remote state cannot solve for itself.
 
-Tell me the bucket name and Object Storage namespace when done. Then populate
-backend.hcl from backend.hcl.example and run:
+Once done, populate backend.hcl from backend.hcl.example and run:
 
+  cd infra
   terraform init -backend-config=backend.hcl
 ```
 
@@ -345,12 +345,12 @@ Thumbs.db
 **Deliverables:**
 - User completes OCI CLI setup per Gate 1
 - User creates Object Storage bucket per Gate 2
-- `backend.tf` updated with the real bucket name and namespace
-- `terraform init` succeeds
+- `backend.hcl` populated from `backend.hcl.example` with real bucket name, namespace, and Customer Secret Keys
+- `terraform init -backend-config=backend.hcl` succeeds
 
 **Acceptance criteria:**
 - `oci iam region list` returns regions from the user's terminal
-- `terraform init` reports successful backend initialization
+- `terraform init -backend-config=backend.hcl` reports successful backend initialization
 
 **Stop gate:** Confirm with user that init succeeded before applying.
 

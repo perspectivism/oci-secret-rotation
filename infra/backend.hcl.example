@@ -14,7 +14,9 @@ region = "<your-region>"
 # OCI Object Storage S3-compatible endpoint for your namespace and region.
 # Format: https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
 # Find your namespace with: oci os ns get
-endpoint = "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com"
+endpoints = {
+  s3 = "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com"
+}
 
 # Customer Secret Key ID for the terraform-state-user service account.
 # Generate in OCI Console: User profile → Customer Secret Keys → Generate Secret Key.
