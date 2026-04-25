@@ -20,7 +20,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** An unauthorized principal invokes the rotation Function to trigger an unsolicited rotation, cause unnecessary credential churn, or attempt to observe the new credential by controlling the target.
 
 **Mitigation:**
-- IAM policy `Allow service vaultsecret to use fn-invocation in compartment id ...` restricts Function invocation from the scheduled path to the `vaultsecret` managed service principal only. No other principal — including the operator who provisioned the infrastructure — holds `fn-invocation` on the Function unless explicitly granted separately.
+- A dedicated IAM dynamic group matches the specific Vault Secret OCID (`resource.type = 'vaultsecret', resource.id = '<ocid>'`). Only that dynamic group is granted `use fn-invocation` scoped to the specific Function OCID (`where target.function.id = '...'`). No other principal — including the operator who provisioned the infrastructure — holds `fn-invocation` on the Function unless explicitly granted separately.
 - Direct invocation via `oci fn function invoke` requires IAM `functions:invokeFunction` scoped to the Function OCID. Only principals explicitly granted this permission in IAM can invoke the Function directly.
 - OCI Functions does not expose an unauthenticated HTTP endpoint. Every invocation path requires a signed OCI API request; unsigned requests are rejected at the API gateway layer.
 
@@ -81,7 +81,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** The rotation Function reads or modifies secrets, buckets, or other OCI resources beyond its explicitly authorized scope.
 
 **Mitigation:**
-- **Secret scope:** IAM policy restricts secret-family access with `where target.secret.name = '<name>'`. Even if the dynamic group matching rule were broadened, the policy condition limits the effective secret scope to the single named secret.
+- **Secret scope:** IAM policy restricts secret-family access with `where target.secret.id = '<ocid>'`. Even if the dynamic group matching rule were broadened, the policy condition limits the effective secret scope to the single secret OCID.
 - **Bucket scope:** IAM policy restricts Object Storage access with `where target.bucket.name = '<name>'`. The Function cannot read or write any other bucket in the compartment.
 - **Dynamic group scope:** The matching rule uses `ALL {resource.type = 'fnfunc', resource.id = '<ocid>'}`. Both conditions must match: the resource must be a Function and must have the specific OCID. Any other Function deployed in the same compartment does not match.
 - **Compartment scope:** All policies are `in compartment id <ocid>` — not `in tenancy`. A misconfigured policy cannot grant access outside the specific compartment.
@@ -126,4 +126,4 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 **Scenario:** A captured or stale invocation request is replayed to cause an unsolicited rotation.
 
-**Mitigation:** OCI Function invocations use OCI request signing (SigV4-equivalent). The signature includes a `Date` header that OCI validates server-side — requests older than 5 minutes are rejected. Replay beyond that window is not possible at the OCI API layer. Additionally, the IAM policy restricts `fn-invocation` to the `vaultsecret` managed service principal, making it structurally difficult for an external attacker to forge a valid invocation request.
+**Mitigation:** OCI Function invocations use OCI request signing (SigV4-equivalent). The signature includes a `Date` header that OCI validates server-side — requests older than 5 minutes are rejected. Replay beyond that window is not possible at the OCI API layer. Additionally, the IAM policy restricts `fn-invocation` to the specific Vault Secret dynamic group scoped to the rotation Function OCID, making it structurally difficult for an external attacker to forge a valid invocation request.

@@ -55,10 +55,11 @@ In priority order:
 │  │                                                           │  │
 │  │   IAM:                                                    │  │
 │  │    • Dynamic group matching Function OCID                 │  │
-│  │    • Policy: DG can manage secret-family (named secret)   │  │
+│  │    • Policy: DG can manage secret-family (secret OCID)    │  │
 │  │    • Policy: DG can manage objects (target bucket)        │  │
 │  │    • Policy: DG can use ons-topics                        │  │
-│  │    • Policy: vaultsecret service can invoke Function      │  │
+│  │    • Dynamic group matching Vault Secret OCID can         │  │
+│  │      invoke Function                                      │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -125,8 +126,7 @@ oci-secret-rotation/
 │   ├── Dockerfile
 │   ├── func.yaml                     # Fn Project config
 │   └── tests/
-│       ├── test_rotation.py
-│       └── test_vault_client.py
+│       └── test_rotation.py
 ├── scripts/
 │   ├── set-env.sh                    # Populates shell env vars from terraform output
 │   └── destroy.sh                    # Clean teardown
@@ -427,7 +427,7 @@ Thumbs.db
 - Policies finalized:
   - Dynamic group can `use secret-family` in compartment
   - Dynamic group can `manage objects` in the target bucket
-  - `vaultsecret` service principal can invoke the Function
+  - Dynamic group matched to the specific Vault Secret OCID can invoke the Function
 - Object Storage bucket provisioned as the rotation target (simulates a credential store)
 - `ObjectStorageTargetClient` implemented — `update_credential` writes the new credential value to a known object in the bucket
 - Function config updated with bucket name, namespace, and object name
@@ -592,10 +592,10 @@ Three required diagrams:
 A static component view showing Vault, the rotation Function, the target system, logging/events, and the IAM relationships (dynamic group, policies). The README version stays high-level; the design doc version shows compartment boundaries, subnet topology if relevant, and the specific IAM principals involved. Both versions must show the same components and relationships — a reviewer should not find contradictions between them.
 
 **2. Rotation sequence diagram — `docs/design.md`.**
-A Mermaid `sequenceDiagram` showing the end-to-end flow of a rotation event: Vault scheduler triggers, Function is invoked, Function reads the current secret, Function provisions a new credential on the target, Function writes the new version to Vault as pending, Function promotes pending to current, Vault emits the version-created event, audit log is written. Include notes on retained previous versions for rollback.
+A Mermaid `sequenceDiagram` showing the end-to-end flow of a rotation event: Vault scheduler triggers, Function is invoked, Function reads the current secret, Function writes the new version to Vault as pending, Function provisions a new credential on the target, Function promotes pending to current, Vault emits the version-created event, audit log is written. Include notes on retained previous versions for rollback.
 
 **3. Rotation state diagram — `docs/adr/0003-rotation-state-machine.md`.**
-A Mermaid `stateDiagram-v2` showing secret version states (Current, Pending, Failed, Retired) and transitions, including the rollback path when target update fails after a pending version is written. This is where the distributed-systems reasoning becomes visually explicit.
+A Mermaid `stateDiagram-v2` showing secret version states (Pending, Current, Previous, Deprecated) and transitions, including the rollback path when target update fails after a pending version is written. This is where the distributed-systems reasoning becomes visually explicit.
 
 Diagrams are first-class deliverables, not decoration. They must match the deployed reality at project close — if the implementation deviates from the original diagram, update the diagram, don't paper over the mismatch.
 

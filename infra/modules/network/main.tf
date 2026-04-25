@@ -1,6 +1,7 @@
-# Looks up the "All <region> Services In Oracle Services Network" CIDR block.
-# This single entry covers all OCI service endpoints (Vault, Secrets, Functions,
-# Object Storage, etc.) and is the correct destination for Service Gateway routes.
+# Looks up the "All <region> Services In Oracle Services Network" service CIDR label.
+# This covers supported regional OCI service API endpoints reachable through a
+# Service Gateway, including Vault, Secret Management/Retrieval, Object Storage,
+# Functions, Notifications, Logging, and OCIR.
 data "oci_core_services" "all_oci_services" {
   filter {
     name   = "name"
@@ -9,6 +10,8 @@ data "oci_core_services" "all_oci_services" {
   }
 }
 
+# VCN that contains all rotation infrastructure. A single CIDR block is
+# sufficient — only one private subnet is needed for the Function application.
 resource "oci_core_vcn" "rotation" {
   compartment_id = var.compartment_id
   cidr_blocks    = [var.vcn_cidr]
@@ -17,9 +20,11 @@ resource "oci_core_vcn" "rotation" {
 }
 
 # Service Gateway routes outbound OCI API traffic (Vault, Secrets) directly over
-# Oracle's backbone network. The rotation Function never needs to reach the internet,
-# so no NAT gateway or internet gateway is created. This is the minimal egress
-# required for the function to operate.
+# Oracle's backbone network without traversing the public internet. The rotation
+# Function does not need public internet egress for this implementation because all
+# its dependencies are OCI services reachable through the Service Gateway. If the
+# production target is an external API or SaaS endpoint, add a NAT Gateway or
+# other approved egress path — no Internet Gateway is created here.
 resource "oci_core_service_gateway" "rotation" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.rotation.id
@@ -30,6 +35,9 @@ resource "oci_core_service_gateway" "rotation" {
   }
 }
 
+# Route table for the private subnet. The single rule sends all Oracle Services
+# Network traffic to the Service Gateway — all other destinations are unreachable,
+# which enforces the no-internet-egress constraint at the routing layer.
 resource "oci_core_route_table" "private" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.rotation.id
@@ -42,14 +50,20 @@ resource "oci_core_route_table" "private" {
   }
 }
 
+# Security list for the private subnet. Only outbound HTTPS to Oracle Services
+# Network is permitted — no ingress rules and no other egress destinations.
 resource "oci_core_security_list" "private" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.rotation.id
   display_name   = "secret-rotation-private-sl"
 
-  # Stateful HTTPS egress to OCI service endpoints via the service gateway.
+  # Stateful HTTPS egress to supported OCI service endpoints via the Service Gateway.
   # Stateful means return traffic is automatically permitted — no ingress rule needed
   # for API responses. protocol "6" = TCP.
+  # This is intentionally narrower than Oracle's Functions subnet example, which allows
+  # all protocols to the Oracle Services Network. TCP/443 is sufficient for this
+  # implementation's HTTPS-based OCI API calls and has been verified with Functions
+  # cold start, OCIR image pull, Vault, Object Storage, Logging, and ONS.
   egress_security_rules {
     destination      = data.oci_core_services.all_oci_services.services[0].cidr_block
     destination_type = "SERVICE_CIDR_BLOCK"

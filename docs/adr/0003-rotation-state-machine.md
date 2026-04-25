@@ -43,8 +43,8 @@ stateDiagram-v2
     [*] --> Pending : Phase 3 — update_secret()
     Pending --> Current : Phase 5 — promote_to_current()
     Current --> Previous : automatic — new version promoted
-    Previous --> Deprecated : retention window elapsed
-    Deprecated --> [*] : scheduled deletion
+    Previous --> Deprecated : new version promoted to Current
+    Deprecated --> [*] : operator schedules explicit deletion
 
     Pending --> Deprecated : orphaned on re-trigger
 ```

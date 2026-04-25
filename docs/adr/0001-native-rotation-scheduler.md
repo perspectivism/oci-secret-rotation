@@ -33,8 +33,8 @@ rotation_config {
 **Easier:**
 - No additional scheduling infrastructure to provision, secure, or maintain
 - Rotation state (last triggered, next trigger, version history) is co-located with the secret in Vault — a single resource holds the complete rotation story
-- Every scheduler-initiated invocation is captured in OCI Audit automatically under the `vaultsecret` service principal
-- The `vaultsecret` service manages invocation using its own managed service principal; no separate IAM principal or API key is required for the scheduler
+- Every scheduler-initiated invocation is captured in OCI Audit automatically under the Vault Secret's resource principal
+- The Vault Secret authenticates via Resource Principal through a dedicated dynamic group matched to its specific OCID; no separate API key is required for the scheduler
 
 **Harder:**
 - `rotation_config` requires the Function OCID at secret creation time, creating a circular Terraform dependency: the secret needs the Function OCID, and the Function app config needs the secret OCID. This is resolved by declaring `function_ocid` as a static input variable in `terraform.tfvars` rather than wiring it from the function module output. The OCID is stable after initial deployment and changes only if the Function resource is destroyed and recreated.

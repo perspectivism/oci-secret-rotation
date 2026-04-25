@@ -24,8 +24,8 @@ resource "oci_functions_application" "rotation" {
 
 # The deployed function. memory_in_mbs and timeout_in_seconds match func.yaml
 # so the Terraform resource and the Fn project manifest stay in sync.
-# The image reference is constructed from the OCIR repo created above — push
-# the image before invoking, but Terraform apply can proceed before the push.
+# The OCIR repository and image are managed by scripts/push-image.sh — it must
+# run before terraform apply because OCI validates the image URL at creation time.
 resource "oci_functions_function" "rotation" {
   application_id     = oci_functions_application.rotation.id
   display_name       = "secret-rotation-handler"

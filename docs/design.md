@@ -41,16 +41,19 @@ The result is a rotation system that is auditable (every rotation event is captu
 
 ```mermaid
 graph TD
-    subgraph compartment["Compartment: secret-rotation"]
-        subgraph iam["IAM"]
-            DG["IAM Dynamic Group<br/>+ Policies"]
-            POL["Policy<br/>(vaultsecret invocation)"]
-        end
+    subgraph tenancy["Tenancy-level IAM"]
+        DG1["Dynamic Group<br/>(specific Function OCID)"]
+        DG2["Dynamic Group<br/>(specific Vault Secret OCID)"]
+        POL["IAM Policies<br/>(compartment-scoped permissions)"]
+        DG1 -. "principal matched by" .-> POL
+        DG2 -. "principal matched by" .-> POL
+    end
 
+    subgraph compartment["Compartment: secret-rotation"]
         subgraph vault_group["OCI Vault"]
             KMS["KMS Master Key"]
             SEC["Secret<br/>(rotation schedule attached)"]
-            KMS -- "encrypts" --> SEC
+            KMS -- "encrypts secret material at rest" --> SEC
         end
 
         subgraph fn_group["OCI Functions"]
@@ -66,16 +69,19 @@ graph TD
             NT["Notifications Topic<br/>(ONS)"]
         end
 
-        SEC -- "invokes on schedule" --> FN
+        SEC -- "Secret Rotation Service invokes on schedule" --> FN
         FN -- "rotates credential on" --> MT
-        FN -- "writes new version to" --> SEC
-        FN -- "publishes notification to" --> NT
-        FN -- "structured logs" --> LG
-        FN -. "member of" .-> DG
-        DG -. "grants access to" .-> SEC
-        DG -. "grants access to" .-> MT
-        DG -. "grants access to" .-> NT
-        POL -. "authorizes invocation" .-> FN
+        FN -- "writes pending/current secret version" --> SEC
+        FN -- "publishes success notification" --> NT
+        FN -- "emits structured logs" --> LG
+
+        POL -. "allows Function to manage target secret by OCID" .-> SEC
+        POL -. "allows Function to write target bucket" .-> MT
+        POL -. "allows Function to publish message" .-> NT
+        POL -. "allows Vault Secret to invoke target Function" .-> FN
+
+        FN -. "matched as fnfunc" .-> DG1
+        SEC -. "matched as vaultsecret" .-> DG2
     end
 ```
 
@@ -83,13 +89,13 @@ graph TD
 
 **OCI Vault + KMS key.** The Vault holds the secret and its version history. A customer-managed KMS master key encrypts secret material at rest. The secret resource carries a `rotation_config` that specifies the rotation interval and the target Function OCID — this is what drives the schedule without any custom cron infrastructure.
 
-**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, updates the Object Storage target, then writes a new pending version to Vault and promotes it to current. It authenticates to OCI APIs using Resource Principal — the Function's OCID is the credential.
+**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, writes a pending version to Vault, updates the Object Storage target, then promotes the pending version to current. It authenticates to OCI APIs using Resource Principal. The Function is included in a narrowly scoped dynamic group by matching its OCID; OCI then issues temporary resource principal credentials to the runtime, so no user API key or static credential is stored in the code.
 
 **Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
-**IAM dynamic group + policies.** The Function's OCID is matched by a dynamic group rule. Five IAM policy statements govern rotation: three grant the dynamic group permission to manage secrets, write to the target bucket, and publish to ONS; two grant the `vaultsecret` scheduler service permission to read and invoke the Function. All are compartment-scoped.
+**IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS. The second matches the specific Vault Secret OCID and is granted permission to read and invoke the Function when the rotation schedule fires — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a resource principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
 
-**OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email (or HTTPS) notification. OCI Events Service does not expose secret version creation events — only Customer Secret Key operations are available — so direct publish from the Function is used instead.
+**OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email (or HTTPS) notification. OCI Events Service does not expose secret version lifecycle events — so direct publish from the Function is used instead.
 
 ---
 
@@ -131,7 +137,7 @@ OCI Vault's `rotation_config` on a secret resource manages the schedule, invocat
 
 ### Resource Principal for Function authentication
 
-The Function authenticates to OCI APIs using its own OCID as the credential — no API keys, no config files, no secrets stored on the Function. The IAM dynamic group rule matches the specific Function OCID, and policies grant only the permissions needed for rotation. If the Function image is compromised, the blast radius is bounded by the policy scope. See [ADR 0002](adr/0002-resource-principal-auth.md).
+The Function authenticates to OCI APIs using Resource Principal — OCI issues temporary credentials to the function runtime based on its dynamic group membership, so no API keys, config files, or static credentials are stored on the Function. The IAM dynamic group rule matches the specific Function OCID, and policies grant only the permissions needed for rotation. If the Function image is compromised, the blast radius is bounded by the policy scope. See [ADR 0002](adr/0002-resource-principal-auth.md).
 
 ### Vault `DEFAULT` protection mode (software keys)
 
@@ -161,7 +167,7 @@ The full state diagram — including the rollback path when target update fails 
 
 **Trust boundaries.** The rotation Function is the only principal that crosses the boundary between the Vault (where the secret lives) and the target (where the credential is applied). This boundary crossing is governed by IAM policy on both sides.
 
-**Authentication model.** No component holds a long-lived credential. The Function authenticates via Resource Principal. Vault's scheduler invokes the Function using the `vaultsecret` service principal, which IAM policy authorizes to call `functions:invokeFunction`.
+**Authentication model.** No component holds a long-lived credential. The Function authenticates via Resource Principal — OCI issues temporary credentials to the runtime based on its dynamic group membership. The Vault Secret also authenticates via Resource Principal; its dynamic group membership grants it permission to invoke the rotation Function when the rotation schedule fires.
 
 **Least-privilege scoping.** All policies are compartment-scoped, not tenancy-scoped. The dynamic group matches the specific Function OCID, not a broad rule like "all functions in the tenancy." If the compartment is deleted or the Function is redeployed to a new OCID, the policy stops matching — the narrowing is intentional.
 
