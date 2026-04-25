@@ -90,11 +90,11 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 
 ## Rotation-Specific Failure Modes
 
-### Target updated, Vault write fails
+Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/0003-rotation-state-machine.md).
 
-**Scenario:** `update_credential()` (Phase 4) succeeds — Object Storage holds the new credential — but `create_pending_version()` (Phase 3) was already called and the `promote_to_current()` call (Phase 5) fails.
+### Target updated, Vault promote fails
 
-*Note:* In the implemented code, Phase 3 (Vault write) executes before Phase 4 (target update). If Phase 3 fails, neither side is changed. If Phase 5 fails after Phase 4 succeeds, the target holds the new credential but Vault CURRENT holds the old one.
+**Scenario:** Phase 3 (`create_pending_version`) and Phase 4 (`update_credential`) both succeed — a PENDING version exists in Vault and Object Storage holds the new credential — but Phase 5 (`promote_to_current`) fails.
 
 **State:** Object Storage and Vault CURRENT are inconsistent. See [ADR 0003](adr/0003-rotation-state-machine.md) for the full ordering rationale.
 

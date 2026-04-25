@@ -1,5 +1,5 @@
 output "function_id" {
-  description = "OCID of the deployed rotation function. Passed to the IAM module to update the dynamic group matching rule in M4."
+  description = "OCID of the deployed rotation function. Used in the IAM dynamic group matching rule to scope rotation permissions to this specific function."
   value       = oci_functions_function.rotation.id
 }
 

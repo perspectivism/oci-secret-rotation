@@ -29,7 +29,6 @@ module "iam" {
   secret_name           = var.secret_name
   function_ocid         = module.function.function_id
   target_bucket_name    = module.target.bucket_name
-  notification_topic_id = module.logging.notification_topic_id
 }
 
 # Target module — private Object Storage bucket that receives the rotated
@@ -41,9 +40,7 @@ module "target" {
   namespace      = data.oci_objectstorage_namespace.tenancy.namespace
 }
 
-# Logging module — creates the log group, custom function log, ONS topic,
-# and the events rule (disabled until M6).
-# notification_endpoint should be set in terraform.tfvars before M6.
+# Logging module — creates the log group, ONS topic, and email subscription.
 module "logging" {
   source = "./modules/logging"
 
@@ -58,9 +55,9 @@ module "network" {
   compartment_id = var.compartment_ocid
 }
 
-# Function module — OCIR repository, Function application, function, and
-# invocation service log. The function image must be pushed to OCIR before
-# the function can be invoked (apply can succeed before the push).
+# Function module — Function application, function, and invocation service log.
+# The OCIR repository and image are managed by scripts/push-image.sh — run it
+# before terraform apply.
 module "function" {
   source = "./modules/function"
 
@@ -70,6 +67,7 @@ module "function" {
   log_group_id          = module.logging.log_group_id
   tenancy_namespace     = data.oci_objectstorage_namespace.tenancy.namespace
   region                = var.region
+  ocir_repo             = var.ocir_repo
   image_tag             = var.image_tag
   target_bucket_name    = module.target.bucket_name
   target_namespace      = module.target.namespace

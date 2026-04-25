@@ -2,7 +2,7 @@
 # Pinning to ~> 8.10 allows patch-level updates within the 8.x minor series while
 # preventing unexpected breaking changes from a major or minor version bump.
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.14"
 
   required_providers {
     oci = {

@@ -54,6 +54,11 @@ resource "oci_identity_policy" "rotation" {
 
     # Grants the rotation Function permission to publish messages to ONS topics
     # in this compartment so it can send a notification after each successful rotation.
-    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to use ons-topics in compartment id ${var.compartment_id}",
+    # 'where request.operation = PublishMessage' restricts this to the publish operation
+    # only — the Function never needs to manage subscriptions or topic metadata.
+    # Note: OCI IAM does not appear to support per-topic target conditions (e.g.
+    # target.ons.topicId) for ons-topics. Further investigation and testing is needed
+    # to determine whether permissions can be tightened to the specific rotation topic.
+    "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to use ons-topics in compartment id ${var.compartment_id} where request.operation = 'PublishMessage'",
   ]
 }

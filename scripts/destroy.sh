@@ -9,9 +9,13 @@
 # BUCKET_NAME already set in the environment).
 #
 # Steps performed:
-#   1. Disable auto-rotation on the secret (OCI blocks deletion otherwise)
-#   2. Empty the target Object Storage bucket (terraform cannot delete a non-empty bucket)
-#   3. terraform destroy
+#   1. Disable auto-rotation, schedule the secret for deletion (2-day window), and
+#      drop it from Terraform state — prevents terraform destroy from hanging or
+#      erroring on the PENDING_DELETION conflict
+#   2. Delete the OCIR container repository — not managed by Terraform, so must
+#      be cleaned up explicitly
+#   3. Empty the target Object Storage bucket (terraform cannot delete a non-empty bucket)
+#   4. terraform destroy
 
 set -euo pipefail
 
@@ -25,15 +29,58 @@ if [[ -z "${SECRET_OCID:-}" ]]; then
 fi
 
 echo ""
-echo "=== Step 1: Disable auto-rotation ==="
-echo "OCI will not schedule a secret for deletion while auto-rotation is enabled."
-oci vault secret update \
+echo "=== Step 1: Prepare secret for deletion ==="
+# Auto-rotation must be disabled before OCI will allow the secret to be scheduled
+# for deletion. Skip if FUNCTION_ID is empty — rotation_config was never applied
+# (first-apply-only deployment), so there is nothing to disable.
+if [[ -z "${FUNCTION_ID:-}" ]]; then
+  echo "FUNCTION_ID not set — rotation was not configured, skipping disable step."
+else
+  echo "Disabling auto-rotation..."
+  oci vault secret update \
+    --secret-id "$SECRET_OCID" \
+    --rotation-config "{\"isScheduledRotationEnabled\": false, \"rotationInterval\": \"P30D\", \"targetSystemDetails\": {\"targetSystemType\": \"FUNCTION\", \"functionId\": \"$FUNCTION_ID\"}}"
+  echo "Auto-rotation disabled."
+fi
+
+# Schedule the secret for deletion before terraform destroy runs. This moves the
+# secret to PENDING_DELETION immediately, which prevents terraform destroy from
+# hanging — Terraform sees the resource is already being removed and skips the
+# delete wait. A 2-day window is used to stay safely above OCI's minimum; the
+# secret is permanently deleted ~48 hours later.
+echo "Scheduling secret for deletion (2-day retention window)..."
+oci vault secret schedule-secret-deletion \
   --secret-id "$SECRET_OCID" \
-  --rotation-config "{\"isScheduledRotationEnabled\": false, \"rotationInterval\": \"P30D\", \"targetSystemDetails\": {\"targetSystemType\": \"FUNCTION\", \"functionId\": \"$FUNCTION_ID\"}}"
-echo "Auto-rotation disabled."
+  --time-of-deletion "$(date -u -d '+2 days' +%Y-%m-%dT%H:%M:%S.000Z)"
+echo "Secret scheduled for deletion — permanently removed in ~48 hours."
+
+# Remove the secret from Terraform state so terraform destroy does not try to
+# delete it again. The OCI provider waits for DELETED state, which won't arrive
+# for ~48 hours — terraform destroy would hang or error with 409-IncorrectState.
+# Dropping it from state lets the OCI-side scheduled deletion handle the cleanup.
+cd "$INFRA_DIR"
+terraform state rm module.vault.oci_vault_secret.secret
+echo "Secret removed from Terraform state."
 
 echo ""
-echo "=== Step 2: Empty target bucket ==="
+echo "=== Step 2: Delete OCIR container repository ==="
+OCIR_REPO=$(grep "^ocir_repo" "$INFRA_DIR/terraform.tfvars" | head -1 | cut -d'"' -f2)
+REPO_ID=$(oci artifacts container repository list \
+  --compartment-id "$COMPARTMENT_OCID" \
+  --display-name "$OCIR_REPO" \
+  --query 'data.items[0].id' \
+  --raw-output 2>/dev/null)
+if [[ -n "$REPO_ID" && "$REPO_ID" != "null" ]]; then
+  oci artifacts container repository delete \
+    --repository-id "$REPO_ID" \
+    --force
+  echo "Container repository deleted."
+else
+  echo "Container repository not found, skipping."
+fi
+
+echo ""
+echo "=== Step 3: Empty target bucket ==="
 echo "Deleting all objects from bucket: $BUCKET_NAME"
 oci os object bulk-delete \
   --namespace "$NAMESPACE" \
@@ -42,7 +89,7 @@ oci os object bulk-delete \
 echo "Bucket emptied."
 
 echo ""
-echo "=== Step 3: terraform destroy ==="
+echo "=== Step 4: terraform destroy ==="
 cd "$INFRA_DIR"
 terraform destroy
 
@@ -50,19 +97,11 @@ echo ""
 echo "=== Destroy complete ==="
 echo ""
 echo "Post-destroy reminders:"
-echo "  • The Vault secret is in PENDING_DELETION state (30-day retention window)."
-echo "    To force deletion sooner:"
-echo "    oci vault secret schedule-secret-deletion \\"
-echo "      --secret-id \$SECRET_OCID \\"
-echo "      --time-of-deletion \$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%S.000Z)"
+echo "  • The Vault secret is in PENDING_DELETION state — it was scheduled for"
+echo "    deletion above with a 2-day window. It will be permanently removed"
+echo "    in ~48 hours. No further action needed."
 echo ""
-echo "  • The KMS master key has a soft-delete window. Delete it via:"
-echo "    OCI Console → Security → Vault → Keys"
-echo ""
-echo "  • The OCIR container image is not removed by terraform destroy."
-echo "    Delete it with:"
-echo "    IMAGE_DIGEST=\$(oci artifacts container image list \\"
-echo "      --compartment-id <COMPARTMENT_OCID> \\"
-echo "      --repository-name secret-rotation/rotation-handler \\"
-echo "      --query 'data.items[0].id' --raw-output)"
-echo "    oci artifacts container image delete --image-id \$IMAGE_DIGEST --force"
+echo "  • The KMS Vault and master key are in PENDING_DELETION state — OCI"
+echo "    enforces a minimum 7-day retention period for vaults and keys."
+echo "    They will be permanently removed after that window expires."
+echo "    To adjust the window: OCI Console → Security → Vault → Keys"

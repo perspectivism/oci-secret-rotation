@@ -43,8 +43,8 @@ The result is a rotation system that is auditable (every rotation event is captu
 graph TD
     subgraph compartment["Compartment: secret-rotation"]
         subgraph iam["IAM"]
-            DG["Dynamic Group<br/>(matches Function OCID)"]
-            POL["Policies<br/>• DG can use secret-family<br/>• vaultsecret can invoke Function"]
+            DG["IAM Dynamic Group<br/>+ Policies"]
+            POL["Policy<br/>(vaultsecret invocation)"]
         end
 
         subgraph vault_group["OCI Vault"]
@@ -62,7 +62,7 @@ graph TD
         MT["Object Storage bucket<br/>(rotation target)"]
 
         subgraph obs["Observability"]
-            LG["Log Group<br/>+ Function logs"]
+            LG["OCI Logging"]
             NT["Notifications Topic<br/>(ONS)"]
         end
 
@@ -71,8 +71,11 @@ graph TD
         FN -- "writes new version to" --> SEC
         FN -- "publishes notification to" --> NT
         FN -- "structured logs" --> LG
-        DG -. "Resource Principal auth" .-> FN
-        POL -. "governs" .-> DG
+        FN -. "member of" .-> DG
+        DG -. "grants access to" .-> SEC
+        DG -. "grants access to" .-> MT
+        DG -. "grants access to" .-> NT
+        POL -. "authorizes invocation" .-> FN
     end
 ```
 
@@ -80,11 +83,11 @@ graph TD
 
 **OCI Vault + KMS key.** The Vault holds the secret and its version history. A customer-managed KMS master key encrypts secret material at rest. The secret resource carries a `rotation_config` that specifies the rotation interval and the target Function OCID — this is what drives the schedule without any custom cron infrastructure.
 
-**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, updates the mock target, then writes a new pending version to Vault and promotes it to current. It authenticates to OCI APIs using Resource Principal — the Function's OCID is the credential.
+**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, updates the Object Storage target, then writes a new pending version to Vault and promotes it to current. It authenticates to OCI APIs using Resource Principal — the Function's OCID is the credential.
 
 **Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
-**IAM dynamic group + policies.** The Function's OCID is matched by a dynamic group rule. Two policy statements grant: (1) the dynamic group permission to read and write secrets in the compartment, and (2) the `vaultsecret` service principal permission to invoke the Function. Both policies are compartment-scoped.
+**IAM dynamic group + policies.** The Function's OCID is matched by a dynamic group rule. Five IAM policy statements govern rotation: three grant the dynamic group permission to manage secrets, write to the target bucket, and publish to ONS; two grant the `vaultsecret` scheduler service permission to read and invoke the Function. All are compartment-scoped.
 
 **OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email (or HTTPS) notification. OCI Events Service does not expose secret version creation events — only Customer Secret Key operations are available — so direct publish from the Function is used instead.
 
@@ -162,7 +165,7 @@ The full state diagram — including the rollback path when target update fails 
 
 **Least-privilege scoping.** All policies are compartment-scoped, not tenancy-scoped. The dynamic group matches the specific Function OCID, not a broad rule like "all functions in the tenancy." If the compartment is deleted or the Function is redeployed to a new OCID, the policy stops matching — the narrowing is intentional.
 
-**Secret version retention.** Vault retains previous versions (configurable, default two versions). This protects against accidental deletion and provides a rollback path. Soft-delete on the secret itself adds a further recovery window before permanent deletion.
+**Secret version retention.** Vault retains all secret versions until explicitly pruned, up to a maximum of 30 active versions. This provides a rollback path. Soft-delete on the secret itself adds a further recovery window before permanent deletion.
 
 **Terraform state security.** Remote state is stored in OCI Object Storage using the OCI native backend (`backend "oci"`). The backend configuration is split: non-sensitive values (bucket name, namespace, region, key path) live in `backend.hcl`, which is `.gitignore`d and never committed. The OCI native backend authenticates through `~/.oci/config` — the same API key used by the OCI Terraform provider — so no separately-managed backend credential (Customer Secret Key, access key, or service account key) is required or created.
 
@@ -189,7 +192,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 **Rotation cadence tradeoffs.** More frequent rotation reduces the window of exposure for a compromised credential but increases the operational load on the target system and the risk of a partial-rotation window (the period between the target being updated and Vault confirming the new version). For most use cases, 30–90 day intervals balance risk reduction against operational noise.
 
-**Blast radius of failure.** If the Function fails after updating the target but before writing to Vault, the target holds a new credential that Vault does not know about. The recovery path — re-trigger rotation — is documented in the runbook. The state machine is designed to detect and recover from this case.
+**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to CURRENT, the target holds a new credential that Vault does not know about. The recovery path — re-trigger rotation — is documented in the runbook. The state machine is designed to detect and recover from this case.
 
 **Rollback path.** Previous secret versions are retained in Vault. Rolling back means promoting the previous version to `CURRENT` and re-applying the old credential to the target. The runbook documents the exact steps.
 
@@ -200,5 +203,5 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 - **Multi-region replication.** Vault secrets can be replicated to a secondary region using OCI Vault cross-region replication. The rotation Function would need to be deployed in both regions, or a single-region Function would need to update both Vault instances. Not implemented here.
 - **Cross-tenancy access.** Secrets shared across tenancies require cross-tenancy IAM policies. The pattern is documented in the OCI IAM docs but is out of scope for this reference.
 - **HSM-backed keys.** Upgrading from `DEFAULT` to `VIRTUAL_PRIVATE` protection mode requires destroying and recreating the KMS key (and therefore the secret). Plan for this before using this pattern with highly sensitive material.
-- **Real target integrations.** Replacing the mock target with a real database (e.g., using OCI Database's password rotation API) or a third-party secret (e.g., a GitHub PAT) follows the same pattern — only `target_client.py` changes.
-- **CI/CD for Function updates.** A GitHub Actions workflow that builds, pushes, and redeploys the Function on merge to `main` is a natural extension. The workflow file is included in the repo as a pattern reference.
+- **Real target integrations.** Replacing the Object Storage target with a real database (e.g., using OCI Database's password rotation API) or a third-party secret (e.g., a GitHub PAT) follows the same pattern — only `target_client.py` changes.
+- **CI/CD for Function updates.** A GitHub Actions workflow that builds, pushes, and redeploys the Function on merge to `main` is a natural extension.

@@ -35,6 +35,12 @@ variable "rotation_interval_days" {
   default     = 30
 }
 
+variable "ocir_repo" {
+  description = "OCIR repository path used to construct the image URL (e.g. secret-rotation/rotation-handler). Must match the value used when building and pushing the image. Also read by scripts/push-image.sh."
+  type        = string
+  default     = "secret-rotation/rotation-handler"
+}
+
 variable "image_tag" {
   description = "Tag of the rotation Function container image in OCIR. Override in terraform.tfvars when deploying a specific build; defaults to latest."
   type        = string
@@ -42,7 +48,7 @@ variable "image_tag" {
 }
 
 variable "function_ocid" {
-  description = "OCID of the deployed rotation Function. Used in the vault rotation_config so the Vault scheduler knows which function to invoke. Declared as a static variable rather than wired from the function module output to break the vault↔function cycle."
+  description = "OCID of the deployed rotation Function. Set to empty string on the first apply — the function does not exist yet. After the first apply, populate this with 'terraform output function_id' and apply again to wire up the vault rotation schedule."
   type        = string
 }
 

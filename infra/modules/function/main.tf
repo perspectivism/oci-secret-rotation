@@ -2,16 +2,6 @@ locals {
   image_url = "${var.region}.ocir.io/${var.tenancy_namespace}/${var.ocir_repo}:${var.image_tag}"
 }
 
-# Private OCIR repository that holds the rotation Function image.
-# is_public = false ensures only authenticated principals with the correct IAM
-# policy can pull the image — the Functions service pulls it using its own
-# service principal when the function is invoked.
-resource "oci_artifacts_container_repository" "rotation" {
-  compartment_id = var.compartment_id
-  display_name   = var.ocir_repo
-  is_public      = false
-}
-
 # Function application — the logical container for one or more functions sharing
 # the same network placement, config, and logging policy.
 # subnet_ids attaches the application to the private subnet created by the
@@ -43,7 +33,6 @@ resource "oci_functions_function" "rotation" {
   memory_in_mbs      = 256
   timeout_in_seconds = 120
 
-  depends_on = [oci_artifacts_container_repository.rotation]
 }
 
 # Service log that captures function invocation events (start, result, duration)

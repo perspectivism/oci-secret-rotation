@@ -21,7 +21,7 @@ In priority order:
 - Multi-region replication (mention in design doc, do not implement)
 - Admin UI or web endpoint (out of scope)
 - Multi-tenant isolation (single compartment is sufficient)
-- Real production target (mock target is fine)
+- Real production target (Object Storage stands in as a demonstrable, observable target)
 - Exhaustive test coverage (smoke tests + key unit tests only)
 
 ---
@@ -32,28 +32,33 @@ In priority order:
 ┌─────────────────────────────────────────────────────────────────┐
 │                       OCI Tenancy                               │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                 Compartment: secret-rotation-demo         │  │
+│  │            Compartment: secret-rotation                   │  │
 │  │                                                           │  │
-│  │   ┌────────────┐    rotation schedule    ┌─────────────┐  │  │
-│  │   │ OCI Vault  │◄───────────────────────►│ OCI Function│  │  │
-│  │   │  Secret    │   invokes on rotate     │  (Python)   │  │  │
-│  │   └──────┬─────┘                         └──────┬──────┘  │  │
-│  │          │ new version written                  │         │  │
-│  │          │                                      │ rotates │  │
-│  │          │                          ┌───────────▼──────┐  │  │
-│  │          │                          │  Mock Target     │  │  │
-│  │          │                          │  (stub service)  │  │  │
-│  │          │                          └──────────────────┘  │  │
-│  │          │                                                │  │
-│  │          ▼                                                │  │
-│  │   ┌────────────────────────────────────────────────────┐  │  │
-│  │   │  OCI Logging + Events (audit trail)                │  │  │
-│  │   └────────────────────────────────────────────────────┘  │  │
+│  │        ┌─────────────────────────────────────────┐        │  │
+│  │        │  OCI Vault Secret                       │        │  │
+│  │        │  (rotation_config: schedule + fn OCID)  │        │  │
+│  │        └─────────────────┬───────────────────────┘        │  │
+│  │        ▲  new version    │  invokes on schedule           │  │
+│  │        │  written        ▼                                │  │
+│  │        │         ┌───────────────┐                        │  │
+│  │        └─────────│  OCI Function │                        │  │
+│  │                  │   (Python)    │                        │  │
+│  │                  └─┬───────────┬─┘                        │  │
+│  │                    │           │                          │  │
+│  │         rotates    │           │  structured logs         │  │
+│  │         credential │           │  + notifications         │  │
+│  │                    ▼           ▼                          │  │
+│  │   ┌──────────────────┐    ┌──────────────────────────┐    │  │
+│  │   │  Object Storage  │    │  OCI Logging + ONS Topic │    │  │
+│  │   │ (rotation target)│    │  (audit trail)           │    │  │
+│  │   └──────────────────┘    └──────────────────────────┘    │  │
 │  │                                                           │  │
 │  │   IAM:                                                    │  │
 │  │    • Dynamic group matching Function OCID                 │  │
-│  │    • Policy: dynamic group can use secret-family          │  │
-│  │    • Policy: vaultsecret principal can invoke Function    │  │
+│  │    • Policy: DG can manage secret-family (named secret)   │  │
+│  │    • Policy: DG can manage objects (target bucket)        │  │
+│  │    • Policy: DG can use ons-topics                        │  │
+│  │    • Policy: vaultsecret service can invoke Function      │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -64,7 +69,7 @@ In priority order:
 - **Resource Principal for Function auth.** No API keys on the Function. Dynamic group membership grants the permissions.
 - **Python for the Function.** Fast iteration with a mature OCI SDK.
 - **Single compartment.** Multi-compartment separation is out of scope for the reference implementation.
-- **Mock target for rotation.** Rotating against a real database is a distraction; the *pattern* is the point.
+- **Object Storage as the rotation target.** The Function writes the new credential to a private Object Storage object after each rotation. This makes the result immediately observable without requiring an external system, while keeping target-specific logic isolated to `target_client.py` — swap that file to rotate a real database or API key without touching anything else.
 - **OCI security-by-design patterns applied:** compartment-scoped IAM policies (not tenancy-scoped), narrow dynamic group matching (specific Function OCID), Resource Principal auth (no credentials on resources), Vault `DEFAULT` protection mode (software keys; upgrade to `VIRTUAL_PRIVATE` documented as future work if HSM is required), and soft-delete retention on secrets for accidental-deletion protection.
 
 ---
@@ -78,6 +83,7 @@ In priority order:
 | Package manager | `pip` with pinned `requirements.txt` | Native fit for fnproject base image; no custom Dockerfile required |
 | Container registry | OCI Container Registry (OCIR) | Native path for OCI Functions |
 | Remote state | OCI Object Storage | Demonstrates team-ready IaC discipline |
+| Rotation target | OCI Object Storage | Observable credential store with no external dependencies; IAM-scoped to a specific bucket |
 | Local dev | Python venv, Terraform CLI, OCI CLI | Standard toolchain |
 | CI (optional) | GitHub Actions workflow file, not necessarily executed | Shows the pattern |
 
@@ -108,13 +114,13 @@ oci-secret-rotation/
 │   │   ├── vault/                    # Vault + KMS key + secret
 │   │   ├── function/                 # Function app + function resource
 │   │   ├── iam/                      # Dynamic groups + policies
-│   │   └── logging/                  # Log groups + events subscription
+│   │   └── logging/                  # Log group, ONS topic, email subscription
 │   └── terraform.tfvars.example      # Example variable values (never commit real)
 ├── function/
 │   ├── func.py                       # Handler entry point
 │   ├── rotation.py                   # Rotation logic
 │   ├── vault_client.py               # Vault SDK wrapper
-│   ├── target_client.py              # Mock target client
+│   ├── target_client.py              # Object Storage target client
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   ├── func.yaml                     # Fn Project config
@@ -122,10 +128,9 @@ oci-secret-rotation/
 │       ├── test_rotation.py
 │       └── test_vault_client.py
 ├── scripts/
-│   ├── bootstrap.sh                  # Initial tenancy setup helper
+│   ├── set-env.sh                    # Populates shell env vars from terraform output
 │   └── destroy.sh                    # Clean teardown
-├── .gitignore                        # MUST exclude *.pem, terraform.tfstate*, .terraform/, *.tfvars
-└── .env.example                      # Example env vars, never commit real
+└── .gitignore                        # MUST exclude *.pem, terraform.tfstate*, .terraform/, *.tfvars
 ```
 
 ---

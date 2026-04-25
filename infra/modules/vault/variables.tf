@@ -21,7 +21,7 @@ variable "secret_name" {
 }
 
 variable "function_ocid" {
-  description = "OCID of the rotation Function. Used in the rotation_config target_system_details block so the Vault scheduler knows which function to invoke."
+  description = "OCID of the rotation Function. Empty string on the first apply — rotation_config is omitted until a real OCID is provided."
   type        = string
 }
 

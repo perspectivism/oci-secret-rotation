@@ -21,6 +21,8 @@ export NOTIFICATION_TOPIC_ID=$(cd "$INFRA_DIR" && terraform output -raw notifica
 export BUCKET_NAME=$(cd "$INFRA_DIR" && terraform output -raw bucket_name)
 export OBJECT_NAME=$(cd "$INFRA_DIR" && terraform output -raw object_name)
 export NAMESPACE=$(cd "$INFRA_DIR" && terraform output -raw namespace)
+export COMPARTMENT_OCID=$(cd "$INFRA_DIR" && terraform output -raw compartment_id)
+export IMAGE_URL=$(cd "$INFRA_DIR" && terraform output -raw image_url)
 export REGION=$(grep '^region' ~/.oci/config | head -1 | cut -d'=' -f2 | tr -d ' ')
 
 echo "Environment ready. Variables set:"
@@ -32,4 +34,6 @@ echo "  NOTIFICATION_TOPIC_ID  = $NOTIFICATION_TOPIC_ID"
 echo "  BUCKET_NAME            = $BUCKET_NAME"
 echo "  OBJECT_NAME            = $OBJECT_NAME"
 echo "  NAMESPACE              = $NAMESPACE"
+echo "  COMPARTMENT_OCID       = $COMPARTMENT_OCID"
+echo "  IMAGE_URL              = $IMAGE_URL"
 echo "  REGION                 = $REGION"

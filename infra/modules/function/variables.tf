@@ -1,5 +1,5 @@
 variable "compartment_id" {
-  description = "OCID of the compartment in which the Function application, function, and OCIR repository are created."
+  description = "OCID of the compartment in which the Function application and function are created."
   type        = string
 }
 
@@ -29,7 +29,7 @@ variable "region" {
 }
 
 variable "ocir_repo" {
-  description = "OCIR repository path (e.g. secret-rotation/rotation-handler). The container repository is created with this name."
+  description = "OCIR repository path (e.g. secret-rotation/rotation-handler). Must match the repo created by scripts/push-image.sh."
   type        = string
   default     = "secret-rotation/rotation-handler"
 }

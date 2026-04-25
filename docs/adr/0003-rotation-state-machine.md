@@ -17,13 +17,23 @@ The chosen ordering must minimize the blast radius of each failure mode and ensu
 
 ## Decision
 
-Operations are ordered: **(1) write new version to Vault as PENDING → (2) update target → (3) promote PENDING to CURRENT in Vault**.
+Operations are ordered: **(Phase 3) write new version to Vault as PENDING → (Phase 4) update target → (Phase 5) promote PENDING to CURRENT in Vault**.
+
+The full phase sequence is:
+
+| Phase | Operation | Log field value |
+|-------|-----------|-----------------|
+| 1 | Read current credential from Vault | `read` |
+| 2 | Generate new credential | — |
+| 3 | Write new version to Vault as PENDING | `vault_pending` |
+| 4 | Push new credential to target | `target_update` |
+| 5 | Promote PENDING to CURRENT in Vault | `vault_promote` |
 
 This ordering is chosen because:
 
-- Failure at step 1 leaves both sides with the old credential — no inconsistency, safe to retry immediately
-- Failure at step 2 leaves Vault with an orphaned PENDING version but CURRENT unchanged — target is still consistent with CURRENT, and re-triggering rotation demotes the orphan and retries cleanly
-- Failure at step 3 is the only inconsistent case, but it is recoverable: re-triggering rotation overwrites the target again and retries the promote; both sides converge on a new credential
+- Failure at Phase 3 leaves both sides with the old credential — no inconsistency, safe to retry immediately
+- Failure at Phase 4 leaves Vault with an orphaned PENDING version but CURRENT unchanged — target is still consistent with CURRENT, and re-triggering rotation demotes the orphan and retries cleanly
+- Failure at Phase 5 is the only inconsistent case, but it is recoverable: re-triggering rotation overwrites the target again and retries the promote; both sides converge on a new credential
 
 The state diagram below shows the lifecycle of a single secret version through these phases, including the abandonment path for orphaned versions:
 
@@ -46,7 +56,7 @@ stateDiagram-v2
 ## Consequences
 
 **Easier:**
-- Phase 1 and Phase 4 failures leave the system in a fully consistent state and are self-recovering on re-trigger with no operator action
+- Phase 3 and Phase 4 failures leave the system in a fully consistent state and are self-recovering on re-trigger with no operator action. Note: the credential itself is not rotated until re-trigger succeeds — if a compliance policy mandates rotation on a fixed cadence, a failed rotation may require a manual re-trigger to remain in compliance even though the system state is consistent.
 - `create_pending_version()` is idempotent on retry: `update_secret()` always creates a new LATEST version; OCI demotes the previous PENDING automatically
 - `promote_to_current()` is idempotent: it checks whether the target version is already CURRENT before making the API call, and returns early if so — safe to call multiple times
 

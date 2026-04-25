@@ -1,5 +1,5 @@
 # Root module outputs — surfaces the OCIDs and names most useful for
-# post-apply verification and for cross-module references in later milestones.
+# post-apply verification and operational use.
 
 output "vault_id" {
   description = "OCID of the OCI Vault. Use with 'oci vault vault get' to confirm the vault is ACTIVE."
@@ -22,12 +22,12 @@ output "key_id" {
 }
 
 output "dynamic_group_name" {
-  description = "Name of the IAM dynamic group. Used to verify the Function is matched into the group after M4 deployment."
+  description = "Name of the IAM dynamic group. Use with the OCI console or CLI to verify the Function OCID is matched into the group."
   value       = module.iam.dynamic_group_name
 }
 
 output "log_group_id" {
-  description = "OCID of the log group. Referenced by the Function application resource in M4."
+  description = "OCID of the log group. The Function application writes invocation logs here."
   value       = module.logging.log_group_id
 }
 
@@ -47,7 +47,7 @@ output "image_url" {
 }
 
 output "notification_topic_id" {
-  description = "OCID of the ONS notification topic. Used to add subscriptions and to verify event delivery in M6."
+  description = "OCID of the ONS notification topic. Used to add subscriptions and verify notification delivery."
   value       = module.logging.notification_topic_id
 }
 
@@ -64,4 +64,9 @@ output "object_name" {
 output "namespace" {
   description = "OCI Object Storage namespace for the tenancy."
   value       = module.target.namespace
+}
+
+output "compartment_id" {
+  description = "OCID of the compartment in which all resources were created. Used in CLI commands that require a compartment scope (e.g., OCIR image listing)."
+  value       = var.compartment_ocid
 }

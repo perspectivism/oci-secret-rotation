@@ -1,6 +1,6 @@
 # Remote state backend using the OCI native backend type.
 #
-# Requires Terraform >= 1.12.0. Uses ~/.oci/config for authentication —
+# Requires Terraform >= 1.14. Uses ~/.oci/config for authentication —
 # the same credentials as the OCI provider. No Customer Secret Keys, no
 # S3-compatible API, no separate service user required.
 #

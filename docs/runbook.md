@@ -1,6 +1,6 @@
 # OCI Secret Rotation — Runbook
 
-Operational procedures for the secret rotation demo. All CLI commands use environment variables populated by the setup script.
+Operational procedures for the secret rotation system. All CLI commands use environment variables populated by the setup script.
 
 ---
 
@@ -14,6 +14,16 @@ source scripts/set-env.sh
 
 This reads all OCIDs and names from `terraform output` and exports them as shell variables. Requires Terraform state to be initialised and a successful `terraform apply`.
 
+Before any `docker push`, authenticate to OCIR using the API keys already configured by `oci setup config`. The bearer token is short-lived and must be re-run each session:
+
+```bash
+docker login ${REGION}.ocir.io \
+  -u BEARER_TOKEN \
+  -p "$(oci raw-request \
+    --http-method GET \
+    --target-uri https://${REGION}.ocir.io/20180419/docker/token | jq -r '.data.access_token')"
+```
+
 ---
 
 ## 1. Manual Rotation
@@ -23,7 +33,10 @@ Trigger rotation and verify all three sides updated.
 **Trigger:**
 
 ```bash
-oci vault secret rotate --secret-id $SECRET_OCID
+oci fn function invoke \
+  --function-id $FUNCTION_ID \
+  --body "" \
+  --file "-"
 ```
 
 **Verify — new secret version in Vault:**
@@ -50,9 +63,9 @@ The output should be a 64-character hex string — the new credential generated 
 
 ```bash
 oci logging-search search-logs \
-  --search-query "search \"$LOG_GROUP_ID\" | sort by datetime desc | limit 20" \
-  --time-start $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S.000Z) \
-  --time-end $(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+  --search-query "search \"$COMPARTMENT_OCID/$LOG_GROUP_ID\" | top 20 by datetime | sort by datetime desc" \
+  --time-start "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S.000Z)" \
+  --time-end "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 ```
 
 Look for a log entry with `"message": "target credential updated"` followed by `"message": "secret version promoted to current"` (or skipped with `"message": "secret version already current, skipping promote"` if the version went directly to CURRENT).
@@ -65,9 +78,9 @@ Look for a log entry with `"message": "target credential updated"` followed by `
 
 ```bash
 oci logging-search search-logs \
-  --search-query "search \"$LOG_GROUP_ID\" | where data.message like '%failed%' | sort by datetime desc | limit 10" \
-  --time-start $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S.000Z) \
-  --time-end $(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+  --search-query "search \"$COMPARTMENT_OCID/$LOG_GROUP_ID\" | where data.message = '*failed*' | top 10 by datetime | sort by datetime desc" \
+  --time-start "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S.000Z)" \
+  --time-end "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 ```
 
 ### Invoke the function directly to see the response in the terminal
@@ -156,13 +169,13 @@ echo -n "$ROLLED_BACK_CRED" | oci os object put \
   --force
 ```
 
-Vault and the target are now consistent. Trigger rotation again to resume normal operation.
+Vault and the target are now consistent. Invoke the function to resume normal operation and confirm the new credential propagates correctly.
 
 ---
 
 ## 4. Secret Version Pruning
 
-OCI Vault retains all secret versions indefinitely unless explicitly pruned. Versions in `DEPRECATED` stage can be scheduled for deletion.
+OCI Vault retains all secret versions until explicitly pruned, up to a maximum of 30 active versions. Versions in `DEPRECATED` stage can be scheduled for deletion.
 
 **List all versions with their stages:**
 
@@ -201,11 +214,7 @@ Use this when the rotation Function image needs to be rebuilt and redeployed —
 **Step 1 — Build and push the new image:**
 
 ```bash
-source scripts/set-env.sh
-IMAGE_URL=$(cd infra && terraform output -raw image_url)
-cd function
-docker build -t "$IMAGE_URL" .
-docker push "$IMAGE_URL"
+bash scripts/push-image.sh
 ```
 
 **Step 2 — Force OCI Functions to pull the new image:**
@@ -235,56 +244,26 @@ A successful rotation returns `{"status": "ok", ...}`. If the response is an err
 
 ## 6. Full Destroy
 
-Tears down all resources created by Terraform.
-
-**Step 1 — Disable auto-rotation on the secret (required before destroy):**
-
-OCI will not schedule a secret for deletion while auto-rotation is enabled. Disable it first:
+Tears down all resources created by Terraform. The teardown script handles the required pre-destroy steps automatically:
 
 ```bash
-oci vault secret update \
-  --secret-id $SECRET_OCID \
-  --rotation-config "{\"isScheduledRotationEnabled\": false, \"rotationInterval\": \"P30D\", \"targetSystemDetails\": {\"targetSystemType\": \"FUNCTION\", \"functionId\": \"$FUNCTION_ID\"}}"
+bash scripts/destroy.sh
 ```
 
-Note: OCI requires `targetSystemDetails` to be present even when disabling rotation — omitting it returns a 400 error.
+The script performs three steps before running `terraform destroy`:
 
-**Step 2 — Empty the target bucket (required before destroy):**
+1. Disables auto-rotation on the secret (OCI blocks deletion while rotation is enabled)
+2. Schedules the secret for deletion with a 2-day retention window and removes it from Terraform state — the OCI provider would otherwise hang waiting for `DELETED` state (which won't arrive for ~48 hours) or error with a `409-IncorrectState` conflict. The secret is permanently removed ~48 hours later.
+3. Empties the target Object Storage bucket (Terraform cannot delete a non-empty bucket)
 
-```bash
-oci os object bulk-delete \
-  --namespace $NAMESPACE \
-  --bucket-name $BUCKET_NAME \
-  --force
-```
+The `terraform destroy` step typically takes 5–10 minutes end to end. Two resources are slow by design:
 
-**Step 3 — Destroy:**
+- **Functions application** — OCI deprovisions the underlying compute infrastructure, not just a metadata record. Expect 2–5 minutes.
+- **ONS notification topic** — OCI cleans up all subscriptions (including pending email confirmations) before deleting the topic. Expect 2–5 minutes.
 
-```bash
-cd infra && terraform destroy
-```
+"Still destroying..." messages from Terraform for these resources are normal; let it run.
 
-**Important notes after destroy:**
+**After destroy — note:**
 
-- The Vault secret enters `PENDING_DELETION` state — it is not immediately destroyed. OCI enforces a soft-delete retention window (default 30 days). To force deletion sooner:
+- The KMS Vault and master key are placed in `PENDING_DELETION` by `terraform destroy`. OCI enforces a minimum 7-day retention period for vaults and keys — they are permanently removed after that window expires. To adjust the window, use the OCI Console under **Security → Vault → Keys**.
 
-  ```bash
-  oci vault secret schedule-secret-deletion \
-    --secret-id $SECRET_OCID \
-    --time-of-deletion $(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%S.000Z)
-  ```
-
-- The KMS master key also has a soft-delete window. Schedule it for deletion via the console under **Security → Vault → Keys** after the secret is fully deleted.
-
-- The OCIR container image is **not removed by `terraform destroy`**. Delete it manually:
-
-  ```bash
-  IMAGE_DIGEST=$(oci artifacts container image list \
-    --compartment-id <COMPARTMENT_OCID> \
-    --repository-name secret-rotation/rotation-handler \
-    --query 'data.items[0].id' --raw-output)
-
-  oci artifacts container image delete --image-id $IMAGE_DIGEST --force
-  ```
-
-- The Object Storage bucket must be empty before `terraform destroy` can remove it — Step 2 above handles this.

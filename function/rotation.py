@@ -1,6 +1,6 @@
 """Core rotation state machine.
 
-rotate() orchestrates four phases:
+rotate() orchestrates five phases:
   1. Read the current secret from Vault (CURRENT version)
   2. Generate a new credential
   3. Create a PENDING version in Vault with the new credential
