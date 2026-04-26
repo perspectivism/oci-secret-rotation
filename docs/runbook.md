@@ -106,7 +106,7 @@ A successful rotation returns `{"status": "ok", ...}`. An error returns `{"error
 | Function returns HTTP 502 / FunctionInvokeExecutionFailed | Unhandled exception in function code | Unknown | Check OCI Logging for stack trace |
 | Function times out (120s) | Target system unreachable or very slow | Unknown — partial state possible | Check VCN/service gateway, check target |
 
-### Check current secret version and its stage
+### List all secret versions and their stages
 
 ```bash
 oci vault secret-version list \
@@ -161,11 +161,11 @@ ROLLED_BACK_CRED=$(oci secrets secret-bundle get \
 **Step 4 — Restore the Object Storage target to match:**
 
 ```bash
-echo -n "$ROLLED_BACK_CRED" | oci os object put \
+printf '%s' "$ROLLED_BACK_CRED" | oci os object put \
   --namespace $NAMESPACE \
   --bucket-name $BUCKET_NAME \
   --name $OBJECT_NAME \
-  --file /dev/stdin \
+  --file - \
   --force
 ```
 
@@ -188,11 +188,12 @@ oci vault secret-version list \
 **Schedule a specific version for deletion:**
 
 ```bash
-# Minimum deletion window is 1 day. Replace <N> and set time at least 24h in the future.
+# Minimum deletion window is 1 day, but use +2 days to stay clear of OCI's boundary check.
+# Replace <N> with the version number to delete.
 oci vault secret-version schedule-deletion \
   --secret-id $SECRET_OCID \
   --secret-version-number <N> \
-  --time-of-deletion $(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%S.000Z)
+  --time-of-deletion "$(date -u -d '+2 days' +%Y-%m-%dT%H:%M:%S.000Z)"
 ```
 
 **Cancel a scheduled deletion:**
