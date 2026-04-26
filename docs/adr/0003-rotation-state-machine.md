@@ -40,7 +40,7 @@ The state diagram below shows the lifecycle of a single secret version through t
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> Pending : Phase 3 — update_secret()
+    [*] --> Pending : Phase 3 — create_pending_version()
     Pending --> Current : Phase 5 — promote_to_current()
     Current --> Previous : automatic — new version promoted
     Previous --> Deprecated : new version promoted to Current

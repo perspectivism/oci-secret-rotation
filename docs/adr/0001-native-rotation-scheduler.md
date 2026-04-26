@@ -37,7 +37,7 @@ rotation_config {
 - The Vault Secret authenticates via Resource Principal through a dedicated dynamic group matched to its specific OCID; no separate API key is required for the scheduler
 
 **Harder:**
-- `rotation_config` requires the Function OCID at secret creation time, creating a circular Terraform dependency: the secret needs the Function OCID, and the Function app config needs the secret OCID. This is resolved by declaring `function_ocid` as a static input variable in `terraform.tfvars` rather than wiring it from the function module output. The OCID is stable after initial deployment and changes only if the Function resource is destroyed and recreated.
+- `rotation_config` requires the Function OCID at secret creation time, creating a circular Terraform dependency: the secret needs the Function OCID, and the Function app config needs the secret OCID. This is sidestepped by declaring `function_ocid` as a static input variable in `terraform.tfvars` rather than wiring it from the function module output. The OCID is stable after initial deployment and changes only if the Function resource is destroyed and recreated.
 - Schedule granularity is calendar-based (ISO 8601 duration, minimum one day). Sub-daily rotation is not supported.
 - Disabling auto-rotation is required before OCI will schedule a secret for deletion — a non-obvious operational step that must be performed before `terraform destroy` can remove a secret. Documented in the runbook.
 
@@ -47,4 +47,4 @@ rotation_config {
 
 **Self-hosted cron (VM or Kubernetes CronJob):** Requires a running compute resource, increasing cost and operational surface. The cron job itself must be secured, monitored, and updated. Any outage of the compute resource silently skips rotation without alerting.
 
-**Event-driven rotation (rotate when the secret reaches a target age):** OCI Events Service does not expose secret access events or secret age events usable as rotation triggers. The only related events published by the vault service are Customer Secret Key operations, not Vault secret version operations. Confirmed empirically during M6 implementation — audit log inspection revealed only `Customer Secret Key - Create/Update/Delete` event types for this service.
+**Event-driven rotation (rotate when the secret reaches a target age):** OCI Events Service does not expose secret version lifecycle events usable as rotation triggers. Confirmed empirically during M6 implementation — OCI Audit and Events inspection found no event types for Vault secret version operations.

@@ -115,7 +115,9 @@ oci-secret-rotation/
 │   │   ├── vault/                    # Vault + KMS key + secret
 │   │   ├── function/                 # Function app + function resource
 │   │   ├── iam/                      # Dynamic groups + policies
-│   │   └── logging/                  # Log group, ONS topic, email subscription
+│   │   ├── logging/                  # Log group, ONS topic, email subscription
+│   │   ├── network/                  # Private VCN, service gateway, subnet
+│   │   └── target/                   # Object Storage rotation target
 │   └── terraform.tfvars.example      # Example variable values (never commit real)
 ├── function/
 │   ├── func.py                       # Handler entry point
@@ -129,6 +131,7 @@ oci-secret-rotation/
 │       └── test_rotation.py
 ├── scripts/
 │   ├── set-env.sh                    # Populates shell env vars from terraform output
+│   ├── push-image.sh                 # Builds and pushes the Function image to OCIR
 │   └── destroy.sh                    # Clean teardown
 └── .gitignore                        # MUST exclude *.pem, terraform.tfstate*, .terraform/, *.tfvars
 ```
@@ -425,7 +428,7 @@ Thumbs.db
 - Secret resource updated with `rotation_config` targeting the Function OCID
 - Dynamic group rule updated to match the deployed Function's OCID
 - Policies finalized:
-  - Dynamic group can `use secret-family` in compartment
+  - Dynamic group can `manage secret-family` in compartment
   - Dynamic group can `manage objects` in the target bucket
   - Dynamic group matched to the specific Vault Secret OCID can invoke the Function
 - Object Storage bucket provisioned as the rotation target (simulates a credential store)
@@ -450,10 +453,9 @@ Thumbs.db
 
 **Deliverables:**
 - Rotation Function publishes directly to ONS topic after each successful rotation
-  (OCI Events Service does not support secret version creation events — only
-  Customer Secret Key operations are exposed; direct publish is more reliable)
+  (OCI Events Service does not expose secret version lifecycle events; direct publish is more reliable)
 - ONS email subscription confirmed and receiving rotation notifications
-- IAM policy scoping the Function's ONS publish permission to the specific topic
+- IAM policy restricting the Function's ONS publish permission to the `PublishMessage` operation across ons-topics in the compartment (per-topic OCID scoping is not supported by OCI IAM for ons-topics)
 - Log search queries documented in runbook
 - Verification: trigger another rotation, confirm email received, OCI Logging entry visible
 

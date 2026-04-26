@@ -7,7 +7,7 @@
 
 ## 1. Problem Statement
 
-Secrets — database passwords, API keys, signing tokens — have a half-life. The longer a credential lives unchanged, the larger the blast radius if it is compromised: an attacker who exfiltrates a five-year-old password has five years' worth of access to revoke and investigate. Regular rotation shrinks that window.
+Secrets — database passwords, API keys, signing tokens — become riskier the longer they remain unchanged. Over time they may be copied into scripts, cached by clients, logged by mistake, shared during incidents, or retained in systems no one actively maintains. If one of those credentials is compromised, responders must treat its entire lifetime as the possible exposure window. Regular rotation limits that window and reduces the amount of history that must be investigated.
 
 Rotation is operationally hard to do well. Done manually it is error-prone and skipped under pressure. Done with a custom scheduler it becomes infrastructure that must itself be secured, monitored, and maintained. The right answer is to push rotation into the platform — to use a managed service that tracks state, handles versioning, and provides an audit trail by default.
 
@@ -77,7 +77,7 @@ graph TD
 
         POL -. "allows Function to manage target secret by OCID" .-> SEC
         POL -. "allows Function to write target bucket" .-> MT
-        POL -. "allows Function to publish message" .-> NT
+        POL -. "allows Function to publish to ons-topics (operation-scoped)" .-> NT
         POL -. "allows Vault Secret to invoke target Function" .-> FN
 
         FN -. "matched as fnfunc" .-> DG1
@@ -93,7 +93,7 @@ graph TD
 
 **Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
-**IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS. The second matches the specific Vault Secret OCID and is granted permission to read and invoke the Function when the rotation schedule fires — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a resource principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
+**IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS. The second matches the specific Vault Secret OCID and is granted compartment-scoped `read fn-function` plus Function-OCID-scoped `use fn-invocation` so the rotation schedule can invoke only the target Function — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a resource principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
 
 **OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email (or HTTPS) notification. OCI Events Service does not expose secret version lifecycle events — so direct publish from the Function is used instead.
 
@@ -105,7 +105,7 @@ graph TD
 sequenceDiagram
     participant VS as OCI Vault Scheduler
     participant FN as Rotation Function
-    participant VW as Vault (write)
+    participant VW as Vault
     participant OS as Object Storage Target
     participant ONS as ONS Topic
     participant LG as OCI Logging
@@ -120,12 +120,12 @@ sequenceDiagram
     OS-->>FN: 200 OK
     FN->>VW: update_secret (current_version_number → CURRENT)
     VW-->>FN: success
-    FN--)ONS: publish_message (rotation complete)
     FN--)LG: structured rotation log entry
+    FN--)ONS: publish_message (rotation complete)
     Note over VW: Previous CURRENT version<br/>moves to PREVIOUS (retained for rollback)
 ```
 
-**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) CreateSecretVersion fails — target untouched, state consistent, safe to retry; (2) UpdateCredential fails after PENDING created — CURRENT unchanged, target consistent with CURRENT, re-trigger creates a fresh PENDING; (3) UpdateSecretVersionStage fails after target update — target holds new credential but CURRENT still reflects old, re-trigger recovers by overwriting both.
+**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version` fails — target untouched, state consistent, safe to retry; (2) `update_credential` fails after the pending version is created — CURRENT unchanged, target still consistent with CURRENT, re-trigger creates a fresh pending version; (3) `promote_to_current` fails after target update — target holds the new credential but CURRENT still reflects the old one, re-trigger recovers by overwriting both.
 
 ---
 
@@ -188,7 +188,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 **What is alerted:**
 - The Function publishes directly to an ONS topic after each successful rotation; subscribers receive an email or HTTPS notification
 - Function invocation failures surface in OCI Logging and can be queried or alerted on
-- Note: OCI Events Service does not expose secret version creation events (only Customer Secret Key operations are available), so event-driven notification is not used
+- Note: OCI Events Service does not expose secret version lifecycle events, so event-driven notification is not used
 
 **How to investigate:** See [docs/runbook.md](runbook.md) for exact CLI commands to query logs, list secret versions, and reconstruct the sequence of events after a rotation.
 

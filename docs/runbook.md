@@ -14,21 +14,17 @@ source scripts/set-env.sh
 
 This reads all OCIDs and names from `terraform output` and exports them as shell variables. Requires Terraform state to be initialised and a successful `terraform apply`.
 
-Before any `docker push`, authenticate to OCIR using the API keys already configured by `oci setup config`. The bearer token is short-lived and must be re-run each session:
+To build and push a new Function image, use the helper script — it handles OCIR authentication, repository creation, and the push in one step:
 
 ```bash
-docker login ${REGION}.ocir.io \
-  -u BEARER_TOKEN \
-  -p "$(oci raw-request \
-    --http-method GET \
-    --target-uri https://${REGION}.ocir.io/20180419/docker/token | jq -r '.data.access_token')"
+bash scripts/push-image.sh
 ```
 
 ---
 
 ## 1. Manual Rotation
 
-Trigger rotation and verify all three sides updated.
+Trigger a rotation, then verify Vault, the Object Storage target, and OCI Logging were updated.
 
 **Trigger:**
 

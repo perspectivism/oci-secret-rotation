@@ -56,7 +56,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 
 **Mitigation:**
 - The rotation Function **does not log the credential value at any phase**. `rotation.py` logs phase names, secret OCIDs, and version numbers — never the plaintext credential. The new credential is generated in memory, passed directly to `target_client.update_credential()`, and never written to any logging context.
-- OCI Vault returns secret content as a base64-encoded payload. The Function decodes it in memory; the decoded string is used directly in the credential update call and not assigned to any variable that logging infrastructure might capture.
+- OCI Vault returns secret content as a base64-encoded payload. The Function decodes it in memory and passes it directly to the credential update call; it is never included in log fields, error messages, or structured logging context.
 - The Object Storage bucket is `NoPublicAccess`. Access requires a signed OCI API request from a principal with IAM permission. No pre-authenticated request URLs are created.
 - `terraform.tfvars` (which contains tenancy OCIDs) is `.gitignore`d and is never committed. Secret content is never written to any file tracked by the repository.
 - Function application config contains the target bucket name, namespace, and secret OCID — resource identifiers, not credential material. Even if this config were read by an unauthorized principal, no credential value is exposed.

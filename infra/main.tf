@@ -10,7 +10,8 @@ data "oci_objectstorage_namespace" "tenancy" {}
 
 # Vault module — creates the KMS key, OCI Vault, and the secret.
 # rotation_config wires the Vault scheduler to invoke the Function on the
-# configured interval. function_ocid comes from the function module output.
+# configured interval. function_ocid is supplied as a static input after the
+# first apply, because the secret and Function depend on each other's OCIDs.
 module "vault" {
   source = "./modules/vault"
 

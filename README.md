@@ -117,7 +117,7 @@ oci fn function invoke \
 
 A successful rotation returns `{"status": "ok", ...}`. Structured logs appear in OCI Logging and a notification email is sent to the address configured in `terraform.tfvars`.
 
-> **First invocation:** OCI Functions pulls the container image and initializes the execution environment on the first call (cold start). This can take anywhere from a few seconds to over a minute depending on image size — the function is configured with a 120s timeout so it will not fail, but expect a delay. Subsequent invocations reuse the warm container and are much faster.
+> **First invocation:** OCI Functions pulls the container image and initializes the execution environment on the first call (cold start). This can take anywhere from a few seconds to over a minute depending on image size — the function is configured with a 120s timeout to allow for cold starts, but expect a delay. Subsequent invocations reuse the warm container and are much faster.
 
 ---
 

@@ -54,7 +54,8 @@ resource "oci_identity_policy" "rotation" {
 
     # Grants the vault secret resource principal permission to look up and invoke
     # the rotation Function when the rotation_config schedule fires.
-    # 'read fn-function' lets the secret resolve the Function endpoint;
+    # 'read fn-function' lets the secret resolve the Function endpoint —
+    # this is compartment-scoped only, not pinned to a specific Function OCID.
     # 'use fn-invocation' lets it send the invocation request, scoped to the
     # specific Function OCID so no other function in the compartment can be invoked.
     # Both are required: without read, the scheduler cannot locate the Function;
@@ -66,8 +67,9 @@ resource "oci_identity_policy" "rotation" {
     # object in the target bucket. manage objects is required because the first
     # rotation uses OBJECT_CREATE (object does not yet exist) and subsequent
     # rotations use OBJECT_OVERWRITE — use objects covers only the latter.
-    # Scoped to the specific bucket by name so the Function cannot access any
-    # other bucket in the compartment.
+    # Tradeoff: manage objects also grants delete, restore, and tier-update on
+    # objects in this bucket. Acceptable here because the bucket holds only the
+    # rotation target object and access is already compartment- and bucket-scoped.
     "Allow dynamic-group ${oci_identity_dynamic_group.rotation_function.name} to manage objects in compartment id ${var.compartment_id} where target.bucket.name = '${var.target_bucket_name}'",
 
     # Grants the rotation Function permission to publish messages to ONS topics
