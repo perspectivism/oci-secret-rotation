@@ -70,3 +70,8 @@ output "compartment_id" {
   description = "OCID of the compartment in which all resources were created. Used in CLI commands that require a compartment scope (e.g., OCIR image listing)."
   value       = var.compartment_ocid
 }
+
+output "region" {
+  description = "OCI region identifier used for all resources in this deployment."
+  value       = var.region
+}

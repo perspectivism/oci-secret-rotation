@@ -23,7 +23,7 @@ export OBJECT_NAME=$(cd "$INFRA_DIR" && terraform output -raw object_name)
 export NAMESPACE=$(cd "$INFRA_DIR" && terraform output -raw namespace)
 export COMPARTMENT_OCID=$(cd "$INFRA_DIR" && terraform output -raw compartment_id)
 export IMAGE_URL=$(cd "$INFRA_DIR" && terraform output -raw image_url)
-export REGION=$(grep '^region' ~/.oci/config | head -1 | cut -d'=' -f2 | tr -d ' ')
+export REGION=$(cd "$INFRA_DIR" && terraform output -raw region)
 
 echo "Environment ready. Variables set:"
 echo "  SECRET_OCID            = $SECRET_OCID"
