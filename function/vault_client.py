@@ -2,7 +2,6 @@
 
 import base64
 import logging
-from typing import Optional
 
 import oci
 from oci.exceptions import ServiceError
@@ -11,6 +10,9 @@ from oci.vault import VaultsClient
 from oci.vault.models import Base64SecretContentDetails, UpdateSecretDetails
 
 logger = logging.getLogger(__name__)
+
+# Maximum retries for update_secret when the secret is transiently UPDATING.
+_UPDATE_MAX_RETRIES = 3
 
 
 class VaultClient:
@@ -21,7 +23,7 @@ class VaultClient:
     during local development or testing.
     """
 
-    def __init__(self, signer: Optional[object] = None) -> None:
+    def __init__(self, signer: object | None = None) -> None:
         """Initialise the Secrets and Vaults client pair.
 
         Args:
@@ -33,6 +35,56 @@ class VaultClient:
         # VaultsClient manages secret metadata and versions (management endpoint).
         self._secrets = SecretsClient(config={}, signer=signer)
         self._vaults = VaultsClient(config={}, signer=signer)
+
+    def _wait_until_active(self, secret_id: str) -> None:
+        """Poll until the secret lifecycle_state returns to ACTIVE.
+
+        OCI's update_secret is asynchronous — the secret enters UPDATING state
+        briefly after the call returns. Subsequent calls (list_secret_versions,
+        promote, another update_secret) will 409 if made while UPDATING.
+        """
+        oci.wait_until(
+            self._vaults,
+            self._vaults.get_secret(secret_id=secret_id),
+            "lifecycle_state",
+            "ACTIVE",
+            max_wait_seconds=30,
+        )
+
+    def _update_secret_with_retry(
+        self, secret_id: str, update_details: UpdateSecretDetails
+    ) -> None:
+        """Call update_secret, retrying on transient 409 UPDATING responses.
+
+        OCI returns 409 IncorrectState when update_secret is called while the
+        secret is already in UPDATING state. This waits for ACTIVE and retries
+        up to _UPDATE_MAX_RETRIES times before giving up.
+        """
+        for attempt in range(1, _UPDATE_MAX_RETRIES + 1):
+            try:
+                self._vaults.update_secret(
+                    secret_id=secret_id,
+                    update_secret_details=update_details,
+                )
+                return
+            except ServiceError as exc:
+                if (
+                    exc.status == 409
+                    and exc.code == "IncorrectState"
+                    and "UPDATING" in (exc.message or "")
+                    and attempt < _UPDATE_MAX_RETRIES
+                ):
+                    logger.warning(
+                        "secret is UPDATING, waiting for ACTIVE before retry",
+                        extra={
+                            "secret_id": secret_id,
+                            "attempt": attempt,
+                            "max_retries": _UPDATE_MAX_RETRIES,
+                        },
+                    )
+                    self._wait_until_active(secret_id)
+                else:
+                    raise
 
     def get_current_secret_content(self, secret_id: str) -> str:
         """Return the decoded plaintext of the CURRENT secret version.
@@ -64,7 +116,9 @@ class VaultClient:
 
         OCI Vault automatically moves any existing PENDING version to
         DEPRECATED when a new one is created, so this is safe to call on
-        retry after a previous partial rotation.
+        retry after a previous partial rotation. Raises RuntimeError if the
+        new version is not PENDING — the stage is set explicitly, so this
+        would indicate an unexpected OCI API behavior.
 
         Args:
             secret_id: OCID of the secret to update.
@@ -77,20 +131,19 @@ class VaultClient:
 
         Raises:
             oci.exceptions.ServiceError: On non-2xx response from Vault.
+            RuntimeError: If the updated secret version cannot be found or is
+                not PENDING.
         """
         encoded = base64.b64encode(new_content.encode()).decode()
         update_details = UpdateSecretDetails(
             secret_content=Base64SecretContentDetails(
                 content_type=Base64SecretContentDetails.CONTENT_TYPE_BASE64,
+                stage=Base64SecretContentDetails.STAGE_PENDING,
                 content=encoded,
             )
         )
         try:
-            self._vaults.update_secret(
-                secret_id=secret_id,
-                update_secret_details=update_details,
-            )
-            versions = self._vaults.list_secret_versions(secret_id=secret_id).data
+            self._update_secret_with_retry(secret_id, update_details)
         except ServiceError as exc:
             logger.error(
                 "failed to create pending secret version",
@@ -98,8 +151,17 @@ class VaultClient:
             )
             raise
 
-        # Secrets with a rotation policy get PENDING; without one OCI promotes
-        # directly to CURRENT. In both cases the new version is always LATEST.
+        self._wait_until_active(secret_id)
+
+        try:
+            versions = self._vaults.list_secret_versions(secret_id=secret_id).data
+        except ServiceError as exc:
+            logger.error(
+                "secret update succeeded but failed to list secret versions",
+                extra={"secret_id": secret_id, "status": exc.status, "code": exc.code},
+            )
+            raise
+
         latest = next(
             (v for v in versions if "LATEST" in (v.stages or [])),
             None,
@@ -108,9 +170,18 @@ class VaultClient:
             raise RuntimeError(
                 f"no LATEST version found after update_secret for secret {secret_id}"
             )
+        if "PENDING" not in (latest.stages or []):
+            raise RuntimeError(
+                f"expected new version to be PENDING but got stages {latest.stages} "
+                f"for secret {secret_id}; expected explicit PENDING stage to be honored"
+            )
         logger.info(
-            "new secret version created",
-            extra={"secret_id": secret_id, "version": latest.version_number, "stages": latest.stages},
+            "new PENDING secret version created",
+            extra={
+                "secret_id": secret_id,
+                "version": latest.version_number,
+                "stages": latest.stages,
+            },
         )
         return latest.version_number
 
@@ -132,20 +203,32 @@ class VaultClient:
             oci.exceptions.ServiceError: On non-2xx response from Vault.
         """
         try:
-            versions = self._vaults.list_secret_versions(secret_id=secret_id).data
-            version = next((v for v in versions if v.version_number == version_number), None)
-            if version and "CURRENT" in (version.stages or []):
-                logger.info(
-                    "secret version already current, skipping promote",
-                    extra={"secret_id": secret_id, "version_number": version_number},
-                )
-                return
-            self._vaults.update_secret(
+            version = self._vaults.get_secret_version(
                 secret_id=secret_id,
-                update_secret_details=UpdateSecretDetails(
-                    current_version_number=version_number,
-                ),
+                secret_version_number=version_number,
+            ).data
+        except ServiceError as exc:
+            logger.error(
+                "failed to retrieve secret version before promote",
+                extra={
+                    "secret_id": secret_id,
+                    "version_number": version_number,
+                    "status": exc.status,
+                    "code": exc.code,
+                },
             )
+            raise
+
+        if "CURRENT" in (version.stages or []):
+            logger.info(
+                "secret version already current, skipping promote",
+                extra={"secret_id": secret_id, "version_number": version_number},
+            )
+            return
+
+        promote_details = UpdateSecretDetails(current_version_number=version_number)
+        try:
+            self._update_secret_with_retry(secret_id, promote_details)
         except ServiceError as exc:
             logger.error(
                 "failed to promote secret version to current",
@@ -157,6 +240,8 @@ class VaultClient:
                 },
             )
             raise
+
+        self._wait_until_active(secret_id)
         logger.info(
             "secret version promoted to current",
             extra={"secret_id": secret_id, "version_number": version_number},

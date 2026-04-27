@@ -61,11 +61,11 @@ oci artifacts container repository create \
   || echo "Repository already exists, continuing."
 
 echo "Authenticating to OCIR..."
-docker login "${REGION}.ocir.io" \
-  -u BEARER_TOKEN \
-  -p "$(oci raw-request \
-    --http-method GET \
-    --target-uri "https://${REGION}.ocir.io/20180419/docker/token" | jq -r '.data.access_token')"
+oci raw-request \
+  --http-method GET \
+  --target-uri "https://${REGION}.ocir.io/20180419/docker/token" \
+  | jq -r '.data.access_token' \
+  | docker login "${REGION}.ocir.io" -u BEARER_TOKEN --password-stdin
 
 echo "Building..."
 docker build -t "$IMAGE_URL" "$FUNCTION_DIR"

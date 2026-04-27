@@ -115,6 +115,8 @@ sequenceDiagram
     VW-->>FN: current credential value
     FN->>FN: generate new credential
     FN->>VW: update_secret (new value → stage LATEST/PENDING)
+    VW-->>FN: update accepted
+    FN->>VW: list_secret_versions (find LATEST/PENDING version number)
     VW-->>FN: new version number
     FN->>OS: put_object (new credential value)
     OS-->>FN: 200 OK

@@ -11,7 +11,6 @@ changes — rotation.py and vault_client.py are target-agnostic.
 
 import abc
 import logging
-from typing import Optional
 
 import oci
 from oci.exceptions import ServiceError
@@ -23,8 +22,9 @@ logger = logging.getLogger(__name__)
 class TargetUpdateError(Exception):
     """Raised when the target system rejects or fails a credential update.
 
-    Rotation treats this as a safe abort: if update_credential raises before
-    the Vault write, state is consistent and rotation can be safely retried.
+    Rotation treats this as a recoverable abort: a PENDING Vault version may
+    exist, but CURRENT remains unchanged and the target still holds the old
+    credential.
     """
 
 
@@ -61,7 +61,7 @@ class ObjectStorageTargetClient(TargetClient):
         namespace: str,
         bucket_name: str,
         object_name: str,
-        signer: Optional[object] = None,
+        signer: object | None = None,
     ) -> None:
         if signer is None:
             signer = oci.auth.signers.get_resource_principals_signer()
@@ -141,7 +141,9 @@ class MockTargetClient(TargetClient):
         """
         if self.fail_on_next_update:
             self.fail_on_next_update = False
-            raise TargetUpdateError("injected failure: target rejected credential update")
+            raise TargetUpdateError(
+                "injected failure: target rejected credential update"
+            )
         self._credential = new_value
         self.update_count += 1
         logger.info(

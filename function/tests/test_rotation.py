@@ -3,8 +3,6 @@
 Tests run with stub Vault and mock Target clients — no OCI connection required.
 """
 
-from typing import Optional
-
 import pytest
 from oci.exceptions import ServiceError
 
@@ -19,30 +17,43 @@ class _StubVaultClient:
         self,
         current_content: str = "old-credential",
         fail_create_pending: bool = False,
+        fail_create_pending_with_runtime_error: bool = False,
         fail_promote: bool = False,
     ) -> None:
         self._current_content = current_content
         self._fail_create_pending = fail_create_pending
+        self._fail_create_pending_with_runtime_error = (
+            fail_create_pending_with_runtime_error
+        )
         self._fail_promote = fail_promote
         # Observation state
-        self.pending_version_created: bool = False
-        self.pending_version_number: Optional[int] = None
+        self.create_pending_called: bool = False
+        self.pending_version_number: int | None = None
         self.promote_called: bool = False
 
     def get_current_secret_content(self, secret_id: str) -> str:
         return self._current_content
 
     def create_pending_version(self, secret_id: str, new_content: str) -> int:
-        self.pending_version_created = True
+        self.create_pending_called = True
         if self._fail_create_pending:
-            raise ServiceError(500, "InternalServerError", {}, "injected vault pending write failure")
+            raise ServiceError(
+                500, "InternalServerError", {}, "injected vault pending write failure"
+            )
+        if self._fail_create_pending_with_runtime_error:
+            raise RuntimeError(
+                f"expected new version to be PENDING but got stages ['CURRENT'] "
+                f"for secret {secret_id} — secret may lack a rotation_config"
+            )
         self.pending_version_number = 2
         return self.pending_version_number
 
     def promote_to_current(self, secret_id: str, version_number: int) -> None:
         self.promote_called = True
         if self._fail_promote:
-            raise ServiceError(500, "InternalServerError", {}, "injected vault promote failure")
+            raise ServiceError(
+                500, "InternalServerError", {}, "injected vault promote failure"
+            )
 
 
 _FAKE_SECRET_ID = "ocid1.vaultsecret.oc1.us-chicago-1.fake"
@@ -53,12 +64,14 @@ def test_rotate_happy_path() -> None:
     vault = _StubVaultClient(current_content="old-credential")
     target = MockTargetClient(initial_credential="old-credential")
 
-    new_cred = rotate(secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target)
+    new_cred = rotate(
+        secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target
+    )
 
     assert len(new_cred) == 64
     assert new_cred != "old-credential"
     assert target.current_credential == new_cred
-    assert vault.pending_version_created
+    assert vault.create_pending_called
     assert vault.promote_called
     assert target.update_count == 1
 
@@ -71,7 +84,28 @@ def test_rotate_create_pending_fails() -> None:
     with pytest.raises(ServiceError):
         rotate(secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target)
 
-    assert vault.pending_version_created
+    assert vault.create_pending_called
+    assert not vault.promote_called
+    assert target.current_credential == "old-credential"
+    assert target.update_count == 0
+
+
+def test_rotate_create_pending_raises_runtime_error() -> None:
+    """create_pending_version raises RuntimeError (e.g. missing rotation_config).
+
+    Target is never touched — state is consistent and safe to retry after
+    fixing the rotation_config.
+    """
+    vault = _StubVaultClient(
+        current_content="old-credential",
+        fail_create_pending_with_runtime_error=True,
+    )
+    target = MockTargetClient(initial_credential="old-credential")
+
+    with pytest.raises(RuntimeError, match="rotation_config"):
+        rotate(secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target)
+
+    assert vault.create_pending_called
     assert not vault.promote_called
     assert target.current_credential == "old-credential"
     assert target.update_count == 0
@@ -92,7 +126,7 @@ def test_rotate_target_fails_after_pending_created() -> None:
     with pytest.raises(TargetUpdateError):
         rotate(secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target)
 
-    assert vault.pending_version_created
+    assert vault.create_pending_called
     assert not vault.promote_called
     assert target.current_credential == "old-credential"
     assert target.update_count == 0
@@ -111,7 +145,7 @@ def test_rotate_promote_fails_after_target_update() -> None:
     with pytest.raises(ServiceError):
         rotate(secret_id=_FAKE_SECRET_ID, vault_client=vault, target_client=target)
 
-    assert vault.pending_version_created
+    assert vault.create_pending_called
     assert vault.promote_called
     # Target holds the new credential while Vault CURRENT still reflects the old one.
     assert target.current_credential != "old-credential"

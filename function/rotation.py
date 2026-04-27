@@ -41,8 +41,9 @@ def rotate(
 ) -> str:
     """Execute one rotation cycle for a secret.
 
-    Reads the current secret, generates a new credential, updates the target,
-    then writes the new credential to Vault.
+    Reads the current secret, generates a new credential, writes a PENDING
+    version to Vault, updates the target, then promotes the PENDING version
+    to CURRENT.
 
     Args:
         secret_id: OCID of the secret to rotate.
@@ -61,6 +62,9 @@ def rotate(
         TargetUpdateError: Target rejected the update (phase 4). A PENDING
             version exists in Vault but CURRENT is unchanged. Re-triggering
             rotation creates a fresh PENDING and retries cleanly.
+        RuntimeError: Vault returned an unexpected version state after
+            create_pending_version (phase 3) — indicates a missing
+            rotation_config on the secret.
     """
     logger.info("rotation started", extra={"secret_id": secret_id, "phase": "start"})
 
@@ -83,9 +87,10 @@ def rotate(
     )
     try:
         pending_version = vault_client.create_pending_version(secret_id, new_credential)
-    except ServiceError:
+    except (ServiceError, RuntimeError):
         logger.error(
-            "vault pending write failed — target unchanged, state is consistent, safe to retry",
+            "vault pending write failed or returned unexpected version state — "
+            "target unchanged, state is consistent, safe to retry",
             extra={"secret_id": secret_id, "phase": "vault_pending_failed"},
         )
         raise

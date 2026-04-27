@@ -243,21 +243,18 @@ namespace, region, and key path) and run:
 
 **Gate 3 (before M4 — pushing the Function image to OCIR):**
 
-```
-STOP. To push the Function image to OCI Container Registry, you need an auth token.
+```text
+STOP. Before continuing, push the Function image to OCI Container Registry:
 
-In the OCI Console:
-  1. Navigate to your user profile → Auth Tokens
-  2. Generate a new token, name it something like "ocir-push-<date>"
-  3. Copy the token value (you will only see it once)
+  bash scripts/push-image.sh
 
-Then in a separate terminal:
+This script authenticates to OCIR via the OCI CLI, creates the repository in
+the target compartment if it does not exist, builds the image, and pushes it.
+Ensure infra/terraform.tfvars is populated and the OCI CLI is configured before
+running it.
 
-  docker login <region>.ocir.io
-  Username: <tenancy-namespace>/<your-username>
-  Password: <paste the auth token>
-
-Do NOT paste the token into this chat. When docker login succeeds, let me know.
+Do NOT paste OCIR tokens or credential material into this chat. Let me know
+when the push succeeds.
 ```
 
 ### What goes in .gitignore (create this in M0)

@@ -25,11 +25,11 @@ module "vault" {
 module "iam" {
   source = "./modules/iam"
 
-  tenancy_id            = var.tenancy_ocid
-  compartment_id        = var.compartment_ocid
-  secret_id             = module.vault.secret_id
-  function_ocid         = module.function.function_id
-  target_bucket_name    = module.target.bucket_name
+  tenancy_id         = var.tenancy_ocid
+  compartment_id     = var.compartment_ocid
+  secret_id          = module.vault.secret_id
+  function_ocid      = module.function.function_id
+  target_bucket_name = module.target.bucket_name
 }
 
 # Target module — private Object Storage bucket that receives the rotated

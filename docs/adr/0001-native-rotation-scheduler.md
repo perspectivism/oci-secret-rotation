@@ -10,7 +10,7 @@ Secret rotation requires a scheduler to trigger the rotation Function on a regul
 Three approaches were evaluated:
 
 - **OCI Vault native `rotation_config`** — the secret resource carries a `rotation_config` block specifying an ISO 8601 interval and the target Function OCID; OCI manages invocation
-- **OCI Cloud Scheduler + Function trigger** — a separate Cloud Scheduler resource fires on a cron expression and invokes the Function
+- **OCI Resource Scheduler + Function trigger** — a separate Resource Scheduler resource fires on a cron expression and invokes the Function
 - **Self-hosted cron** — a compute resource (VM or Kubernetes CronJob) runs a scheduled script
 
 ## Decision
@@ -20,7 +20,7 @@ Use OCI Vault's native `rotation_config` on the secret resource:
 ```hcl
 rotation_config {
   is_scheduled_rotation_enabled = true
-  rotation_interval              = "P30D"
+  rotation_interval             = "P30D"
   target_system_details {
     target_system_type = "FUNCTION"
     function_id        = var.function_ocid
@@ -43,7 +43,7 @@ rotation_config {
 
 ## Alternatives Considered
 
-**OCI Cloud Scheduler:** Requires provisioning and maintaining a separate resource with its own lifecycle. Does not carry native awareness of secret state — it fires an invocation but knows nothing about the current version or rotation history. Adds a second service to monitor and keep in sync with the secret's lifecycle.
+**OCI Resource Scheduler:** Requires provisioning and maintaining a separate resource with its own lifecycle. Does not carry native awareness of secret state — it fires an invocation but knows nothing about the current version or rotation history. Adds a second service to monitor and keep in sync with the secret's lifecycle.
 
 **Self-hosted cron (VM or Kubernetes CronJob):** Requires a running compute resource, increasing cost and operational surface. The cron job itself must be secured, monitored, and updated. Any outage of the compute resource silently skips rotation without alerting.
 

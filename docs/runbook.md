@@ -64,7 +64,10 @@ oci logging-search search-logs \
   --time-end "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 ```
 
-Look for a log entry with `"message": "target credential updated"` followed by `"message": "secret version promoted to current"` (or skipped with `"message": "secret version already current, skipping promote"` if the version went directly to CURRENT).
+Look for a log entry with `"message": "target credential updated"` followed by
+`"message": "secret version promoted to current"` (or skipped with
+`"message": "secret version already current, skipping promote"` if a retry finds
+the version already `CURRENT`).
 
 ---
 
@@ -96,7 +99,8 @@ A successful rotation returns `{"status": "ok", ...}`. An error returns `{"error
 |---|---|---|---|
 | `missing config: ['SECRET_OCID', ...]` | Function config not updated after `terraform apply` | Nothing changed | Re-run `terraform apply`, update function image |
 | `failed to read secret bundle` | Function cannot read the secret — IAM policy missing or propagating | Nothing changed | Wait 60s for IAM propagation, retry |
-| `no LATEST version found after update_secret` | OCI API returned unexpected state | Secret unchanged | Retry rotation |
+| `no LATEST version found after update_secret` | OCI API returned unexpected state | Unknown — inspect versions | Retry rotation |
+| `expected new version to be PENDING` | Secret is missing `rotation_config` or Vault returned unexpected rotation state | New version may have been created; target not updated | Fix `rotation_config`, inspect versions, retry |
 | `failed to write credential to object storage` | IAM policy missing for bucket write or bucket deleted | New secret version created, target NOT updated | Restore IAM policy, retry rotation |
 | `rotation succeeded but notification failed` | IAM policy for ONS missing or propagating | Rotation complete, email not sent | Wait 60s, retry; or check IAM policy |
 | Function returns HTTP 502 / FunctionInvokeExecutionFailed | Unhandled exception in function code | Unknown | Check OCI Logging for stack trace |
@@ -120,6 +124,23 @@ oci secrets secret-bundle get \
   --query 'data."secret-bundle-content".content' \
   --raw-output | base64 -d
 ```
+
+### Alerting on rotation failures
+
+The rotation Function publishes an ONS notification only after a successful
+rotation. Failed rotations surface in OCI Logging as ERROR-level entries.
+
+For proactive failure alerting, create an OCI Connector Hub connector with:
+
+- Source: Logging
+- Source log group: the rotation Function log group
+- Filter: ERROR-level rotation Function entries
+- Target: Notifications
+- Topic: the same ONS topic used for success notifications
+
+If metric-based alerting is preferred, route the filtered logs from Connector Hub
+to OCI Monitoring instead, then create a Monitoring alarm that fires when the
+generated error-count metric is greater than zero.
 
 ---
 
@@ -200,7 +221,7 @@ oci vault secret-version cancel-deletion \
   --secret-version-number <N>
 ```
 
-Do not delete `CURRENT` or `PENDING` versions — only `PREVIOUS` and `DEPRECATED` versions are safe to prune.
+Do not delete `CURRENT`, `PENDING`, or `PREVIOUS` versions. Only `DEPRECATED` versions should be pruned.
 
 ---
 
@@ -247,11 +268,12 @@ Tears down all resources created by Terraform. The teardown script handles the r
 bash scripts/destroy.sh
 ```
 
-The script performs three steps before running `terraform destroy`:
+The script performs four pre-destroy cleanup steps, then runs `terraform destroy`:
 
 1. Disables auto-rotation on the secret (OCI blocks deletion while rotation is enabled)
 2. Schedules the secret for deletion with a 2-day retention window and removes it from Terraform state — the OCI provider would otherwise hang waiting for `DELETED` state (which won't arrive for ~48 hours) or error with a `409-IncorrectState` conflict. The secret is permanently removed ~48 hours later.
-3. Empties the target Object Storage bucket (Terraform cannot delete a non-empty bucket)
+3. Deletes the OCIR container repository (not managed by Terraform, so it must be cleaned up explicitly)
+4. Empties the target Object Storage bucket (Terraform cannot delete a non-empty bucket)
 
 The `terraform destroy` step typically takes 5–10 minutes end to end. Two resources are slow by design:
 

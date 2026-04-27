@@ -28,12 +28,32 @@ from target_client import ObjectStorageTargetClient
 from vault_client import VaultClient
 
 # Standard LogRecord attributes excluded from the JSON extra-fields pass-through.
-_LOG_RESERVED = frozenset({
-    "args", "created", "exc_info", "exc_text", "filename", "funcName",
-    "levelname", "levelno", "lineno", "message", "module", "msecs", "msg",
-    "name", "pathname", "process", "processName", "relativeCreated",
-    "stack_info", "taskName", "thread", "threadName",
-})
+_LOG_RESERVED = frozenset(
+    {
+        "args",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "message",
+        "module",
+        "msecs",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "taskName",
+        "thread",
+        "threadName",
+    }
+)
 
 
 class _JsonFormatter(logging.Formatter):
@@ -71,12 +91,14 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 
-def handler(ctx, data: io.BytesIO = None) -> response.Response:
+def handler(ctx, data: io.BytesIO | None = None) -> response.Response:
     """Handle a single rotation invocation from the Fn runtime.
 
     Reads SECRET_OCID from function config, delegates to rotate(), and returns
-    a JSON response. Returns HTTP 500 on any failure so the Vault rotation
-    scheduler can detect and report the error.
+    a JSON response. Returns HTTP 500 for missing required config or rotation
+    failure so the Vault rotation scheduler can detect and report the error.
+    Notification failures are logged as warnings and do not affect the response
+    status.
 
     Args:
         ctx: Fn context — provides the Config dict and request metadata.
@@ -92,15 +114,21 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
     target_object = cfg.get("TARGET_OBJECT", "").strip()
     ons_topic_id = cfg.get("ONS_TOPIC_ID", "").strip()
 
-    missing = [k for k, v in {
-        "SECRET_OCID": secret_id,
-        "TARGET_BUCKET": target_bucket,
-        "TARGET_NAMESPACE": target_namespace,
-        "TARGET_OBJECT": target_object,
-        "ONS_TOPIC_ID": ons_topic_id,
-    }.items() if not v]
+    missing = [
+        k
+        for k, v in {
+            "SECRET_OCID": secret_id,
+            "TARGET_BUCKET": target_bucket,
+            "TARGET_NAMESPACE": target_namespace,
+            "TARGET_OBJECT": target_object,
+            "ONS_TOPIC_ID": ons_topic_id,
+        }.items()
+        if not v
+    ]
     if missing:
-        logger.error("missing required function config keys", extra={"missing": missing})
+        logger.error(
+            "missing required function config keys", extra={"missing": missing}
+        )
         return response.Response(
             ctx,
             response_data=json.dumps({"error": f"missing config: {missing}"}),
@@ -108,14 +136,15 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
             status_code=500,
         )
 
-    vault = VaultClient()
-    target = ObjectStorageTargetClient(
-        namespace=target_namespace,
-        bucket_name=target_bucket,
-        object_name=target_object,
-    )
-
     try:
+        signer = oci.auth.signers.get_resource_principals_signer()
+        vault = VaultClient(signer=signer)
+        target = ObjectStorageTargetClient(
+            namespace=target_namespace,
+            bucket_name=target_bucket,
+            object_name=target_object,
+            signer=signer,
+        )
         rotate(secret_id=secret_id, vault_client=vault, target_client=target)
     except Exception as exc:
         logger.error(
@@ -125,16 +154,21 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
         )
         return response.Response(
             ctx,
-            response_data=json.dumps({
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-            }),
+            response_data=json.dumps(
+                {
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            ),
             headers={"Content-Type": "application/json"},
             status_code=500,
         )
 
+    # Best-effort post-rotation notification. Rotation is already complete, so
+    # ONS failures are logged as warnings but do not fail the invocation. Failed
+    # rotations do not publish notifications; see the runbook for Connector Hub
+    # failure alerting.
     try:
-        signer = oci.auth.signers.get_resource_principals_signer()
         ons = NotificationDataPlaneClient(config={}, signer=signer)
         ons.publish_message(
             topic_id=ons_topic_id,
@@ -147,6 +181,7 @@ def handler(ctx, data: io.BytesIO = None) -> response.Response:
         logger.warning(
             "rotation succeeded but notification failed",
             extra={"secret_id": secret_id, "error": str(exc)},
+            exc_info=True,
         )
 
     return response.Response(
