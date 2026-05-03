@@ -46,7 +46,7 @@ if [[ -z "$COMPARTMENT_OCID" ]]; then
   exit 1
 fi
 
-NAMESPACE=$(oci os ns get | jq -r '.data')
+NAMESPACE=$(oci os ns get --query 'data' --raw-output)
 IMAGE_URL="${REGION}.ocir.io/${NAMESPACE}/${OCIR_REPO}:${IMAGE_TAG}"
 
 echo "Image: $IMAGE_URL"
@@ -61,6 +61,11 @@ oci artifacts container repository create \
   || echo "Repository already exists, continuing."
 
 echo "Authenticating to OCIR..."
+# Obtains a short-lived bearer token via the OCI CLI and pipes it directly to
+# docker login so the token is not written to shell history. Docker may still
+# persist the login in ~/.docker/config.json, or in an external credential
+# store/helper if configured.
+# See: https://docs.docker.com/reference/cli/docker/login/#credential-stores
 oci raw-request \
   --http-method GET \
   --target-uri "https://${REGION}.ocir.io/20180419/docker/token" \

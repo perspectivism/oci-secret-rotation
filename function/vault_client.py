@@ -115,7 +115,7 @@ class VaultClient:
         """Create a new PENDING secret version with the given content.
 
         OCI Vault automatically moves any existing PENDING version to
-        DEPRECATED when a new one is created, so this is safe to call on
+        DEPRECATED when a new one is created (empirically verified) — so this is safe to call on
         retry after a previous partial rotation. Raises RuntimeError if the
         new version is not PENDING — the stage is set explicitly, so this
         would indicate an unexpected OCI API behavior.

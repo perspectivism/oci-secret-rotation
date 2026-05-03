@@ -4,7 +4,7 @@
 #
 #   source scripts/set-env.sh
 #
-# Requires: terraform, OCI CLI, jq (for log search output formatting)
+# Requires: terraform, jq
 # Must be run after `terraform apply` has completed at least once.
 
 set -euo pipefail
@@ -13,17 +13,21 @@ INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infra" && pwd)"
 
 echo "Reading Terraform outputs from $INFRA_DIR ..."
 
-export SECRET_OCID=$(cd "$INFRA_DIR" && terraform output -raw secret_id)
-export FUNCTION_ID=$(cd "$INFRA_DIR" && terraform output -raw function_id)
-export VAULT_ID=$(cd "$INFRA_DIR" && terraform output -raw vault_id)
-export LOG_GROUP_ID=$(cd "$INFRA_DIR" && terraform output -raw log_group_id)
-export NOTIFICATION_TOPIC_ID=$(cd "$INFRA_DIR" && terraform output -raw notification_topic_id)
-export BUCKET_NAME=$(cd "$INFRA_DIR" && terraform output -raw bucket_name)
-export OBJECT_NAME=$(cd "$INFRA_DIR" && terraform output -raw object_name)
-export NAMESPACE=$(cd "$INFRA_DIR" && terraform output -raw namespace)
-export COMPARTMENT_OCID=$(cd "$INFRA_DIR" && terraform output -raw compartment_id)
-export IMAGE_URL=$(cd "$INFRA_DIR" && terraform output -raw image_url)
-export REGION=$(cd "$INFRA_DIR" && terraform output -raw region)
+_tf_outputs=$(cd "$INFRA_DIR" && terraform output -json)
+
+_get() { printf '%s' "$_tf_outputs" | jq -r ".$1.value"; }
+
+export SECRET_OCID=$(            _get secret_id)
+export FUNCTION_ID=$(            _get function_id)
+export VAULT_ID=$(               _get vault_id)
+export LOG_GROUP_ID=$(           _get log_group_id)
+export NOTIFICATION_TOPIC_ID=$(  _get notification_topic_id)
+export BUCKET_NAME=$(            _get bucket_name)
+export OBJECT_NAME=$(            _get object_name)
+export NAMESPACE=$(              _get namespace)
+export COMPARTMENT_OCID=$(       _get compartment_id)
+export IMAGE_URL=$(              _get image_url)
+export REGION=$(                 _get region)
 
 echo "Environment ready. Variables set:"
 echo "  SECRET_OCID            = $SECRET_OCID"

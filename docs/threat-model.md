@@ -46,7 +46,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 - **OCI Audit** captures API calls such as Vault reads, Vault writes, Function invocations, and ONS publishes, including caller identity (such as the Function OCID for Resource Principal calls), timestamp, request ID, and source IP. OCI Audit cannot be disabled at the tenancy level; it is managed by OCI and is available for forensic reconstruction. Note: object-level `put_object` operations are not captured by OCI Audit; capture them with Object Storage service logs if needed. The rotation Function's structured log entry at the `target_update` phase provides the application-level evidence of the write.
 - The rotation Function emits structured JSON log entries to OCI Logging at each phase (`start`, `read`, `vault_pending`, `target_update`, `vault_promote`, `complete`). Each entry includes the secret OCID, phase name, and version number where relevant.
 - After each successful rotation the Function publishes a message to the ONS topic. The message includes the secret OCID, status, and is delivered to subscribed endpoints (email, HTTPS webhook). This provides an out-of-band confirmation trail independent of OCI Logging.
-- Vault retains all secret versions indefinitely unless explicitly pruned. Any previous version can be retrieved by version number (`oci secrets secret-bundle get --version-number <N>`), enabling forensic reconstruction of the credential sequence.
+- Vault retains secret versions until explicitly pruned, subject to OCI Vault version limits. Any retained previous version can be retrieved by version number (`oci secrets secret-bundle get --version-number <N>`), enabling forensic reconstruction of the credential sequence.
 
 ---
 
@@ -68,11 +68,11 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** The rotation Function is unavailable, rate-limited, or its invocation is blocked, preventing scheduled rotation from completing.
 
 **Mitigation:**
-- OCI Functions and OCI Vault are managed services with OCI SLAs. Transient unavailability is handled by the Vault scheduler's built-in retry behavior.
+- OCI Functions and OCI Vault are managed services with OCI SLAs. Transient failures should be investigated through logs; retry behavior of the Vault scheduler has not been validated empirically and should not be assumed.
 - A failed rotation does **not** invalidate the current credential. The CURRENT version in Vault remains valid and usable until a successful rotation completes. The system degrades gracefully — credentials continue to work, just without renewal.
-- The 30-day default rotation interval provides a large window before a missed rotation becomes operationally significant. Manual rotation (`oci vault secret rotate`) is always available as an out-of-band fallback.
+- The 30-day default rotation interval provides a large window before a missed rotation becomes operationally significant. Manual rotation (`oci vault secret rotate`) can be used as an out-of-band fallback when IAM and rotation configuration are healthy.
 - The Function has a 120-second timeout (`timeout_in_seconds = 120`). An unreachable or unresponsive target causes a clean timeout and a logged failure rather than a hung invocation.
-- OCI Logging captures structured log entries for every failed rotation phase. The runbook provides exact CLI queries to investigate missed rotations.
+- The Function emits structured log entries for failed rotation phases, which are captured in OCI Logging when function logging is enabled. The runbook provides exact CLI queries to investigate missed rotations.
 
 ---
 
@@ -108,7 +108,7 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 **State:** Vault has an orphaned PENDING version. CURRENT still holds the old credential. Target is consistent with CURRENT.
 
-**Recovery:** Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned PENDING to DEPRECATED when the new PENDING is created. Rotation proceeds from a consistent state. See [ADR 0003](adr/0003-rotation-state-machine.md).
+**Recovery:** Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned PENDING to DEPRECATED when the new PENDING is created (empirically verified). Rotation proceeds from a consistent state. See [ADR 0003](adr/0003-rotation-state-machine.md).
 
 ---
 
@@ -127,3 +127,16 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 **Scenario:** A captured or stale invocation request is replayed to cause an unsolicited rotation.
 
 **Mitigation:** OCI Function invocations use OCI request signing (SigV4-equivalent). The signature includes a `Date` header that OCI validates server-side — requests older than 5 minutes are rejected. Replay beyond that window is not possible at the OCI API layer. Additionally, the IAM policy restricts `fn-invocation` to the specific Vault Secret dynamic group scoped to the rotation Function OCID, making it structurally difficult for an external attacker to forge a valid invocation request.
+
+---
+
+### Operator workstation credentials
+
+**Out of scope for the runtime threat model, but noted for completeness:**
+
+No long-lived credentials are stored on OCI runtime resources — the rotation Function and Vault Secret both authenticate via Resource Principal. However, operators interact with this system using the OCI CLI, which stores a long-lived API key in `~/.oci/`. Compromise of an operator workstation could expose this key and allow an attacker to perform any OCI actions permitted by that IAM user, which may include invoking the Function, reading secret versions, or modifying IAM policy.
+
+Mitigations at the operator level (outside this system's control):
+- Restrict OCI IAM user permissions to the minimum required for deployment and operations
+- Use OCI CLI profiles tied to IAM users with MFA enabled, and require MFA for console access
+- Rotate OCI API keys on a regular schedule and promptly revoke keys when team members leave the project

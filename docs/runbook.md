@@ -22,11 +22,11 @@ bash scripts/push-image.sh
 
 ---
 
-## 1. Manual Rotation
+## 1. Manually Invoke the Rotation Function
 
-Trigger a rotation, then verify Vault, the Object Storage target, and OCI Logging were updated.
+Two ways to trigger rotation manually:
 
-**Trigger:**
+**Option A — Direct Function invocation (synchronous):**
 
 ```bash
 oci fn function invoke \
@@ -34,6 +34,17 @@ oci fn function invoke \
   --body "" \
   --file "-"
 ```
+
+The runbook uses this form because the response (`{"status": "ok", ...}` or an error) is returned directly to the terminal, making it easier to confirm success or diagnose failures immediately. Note that this path uses your OCI CLI user credentials, not the Vault Secret resource principal — it does not exercise the `fn-invocation` IAM path that the scheduler uses.
+
+**Option B — Via OCI Vault (asynchronous, exercises the full IAM path):**
+
+```bash
+oci vault secret rotate \
+  --secret-id $SECRET_OCID
+```
+
+This invokes the Function through the same Vault Secret resource principal and `fn-invocation` IAM path that the rotation schedule uses. It returns a work request ID immediately; the rotation completes in the background. Use this to validate the end-to-end scheduled rotation path, including IAM policy correctness for the Vault Secret dynamic group.
 
 **Verify — new secret version in Vault:**
 

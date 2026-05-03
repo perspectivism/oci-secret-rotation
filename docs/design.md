@@ -13,7 +13,7 @@ Rotation is operationally hard to do well. Done manually it is error-prone and s
 
 This system demonstrates the canonical OCI pattern for doing exactly that: OCI Vault's native rotation scheduling triggers a customer-owned Function that performs the actual credential change. The Function is authenticated via Resource Principal — it carries no API keys, no passwords, no credentials of its own. IAM policy grants it exactly the permissions it needs and nothing more.
 
-The result is a rotation system that is auditable (every rotation event is captured in OCI Logging), recoverable (Vault retains previous secret versions for rollback), and operationally simple (rotation runs on a schedule without human intervention).
+The result is a rotation system that is auditable (the Function emits structured logs for each rotation phase to OCI Logging), recoverable (Vault retains previous secret versions for rollback), and operationally simple (rotation runs on a schedule without human intervention).
 
 ---
 
@@ -185,7 +185,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 **What is logged:**
 - Every Function invocation (start, success, failure) via structured JSON to OCI Logging
-- Every Vault API call is captured in OCI Audit automatically (cannot be disabled)
+- Vault API activity is available through OCI Audit (cannot be disabled)
 
 **What is alerted:**
 - The Function publishes directly to an ONS topic after each successful rotation; subscribers receive an email or HTTPS notification

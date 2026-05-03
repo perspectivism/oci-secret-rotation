@@ -2,7 +2,7 @@
 
 A production-grade reference implementation of the canonical OCI secret rotation pattern:
 **OCI Vault native rotation scheduling** + **custom Function as the rotation target**,
-authenticated via Resource Principal (no long-lived credentials anywhere).
+authenticated via Resource Principal (no long-lived credentials stored on OCI runtime resources).
 
 ---
 
@@ -40,7 +40,7 @@ graph TD
 - Terraform ≥ 1.14
 - Python 3.12 + pip
 - Docker (for building and pushing the Function image)
-- jq (JSON processor) — for OCIR authentication and log output parsing
+- jq — for JSON parsing in helper scripts
 
 ### 1. Configure OCI authentication
 
@@ -82,7 +82,7 @@ cp infra/terraform.tfvars.example infra/terraform.tfvars
 bash scripts/push-image.sh
 ```
 
-This reads `region`, `ocir_repo`, and `image_tag` from `terraform.tfvars`, authenticates to OCIR using your OCI CLI credentials, and pushes the image. OCI validates the image exists when creating the function resource, so this must run before `terraform apply`.
+This reads `region`, `ocir_repo`, and `image_tag` from `terraform.tfvars`, authenticates Docker to OCIR using a short-lived bearer token obtained via the OCI CLI, and pushes the image. The Function resource references the pushed image, so the image must exist in OCIR before the Function can be deployed successfully.
 
 ### 5. Deploy infrastructure
 
