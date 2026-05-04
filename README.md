@@ -160,7 +160,7 @@ oci-secret-rotation/
 
 ## Security
 
-- No API keys or long-lived credentials on any OCI resource
+- No API keys or long-lived credentials stored on deployed OCI resources
 - IAM policies are compartment-scoped, not tenancy-scoped
 - Dynamic group matches the specific Function OCID (narrow scope)
 - Vault soft-delete retention protects against accidental deletion
@@ -168,4 +168,4 @@ oci-secret-rotation/
 
 ---
 
-*This is a reference implementation, not a production deployment. See [docs/design.md](docs/design.md) §10 for known limitations and future work.*
+*This is a reference implementation, not a production deployment. See [§10 — Future Work](docs/design.md#10-future-work) for known limitations and future work.*

@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Threat Model
 
 **Status:** Accepted
-**Last updated:** 2026-04-22
+**Last updated:** 2026-05-04
 
 ---
 
@@ -118,7 +118,11 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 **State:** Two Function invocations execute concurrently, each generating a different credential and racing to write to Vault and Object Storage.
 
-**Mitigation:** Both Vault's `update_secret()` and Object Storage's `put_object()` are last-write-wins. One invocation wins the race; the other produces an orphaned PENDING version that is automatically demoted to DEPRECATED on the winner's `update_secret()` call. The resulting credential set is self-consistent — one rotation wins, the other is effectively a no-op. OCI Audit captures both invocations and their caller identities for forensic reconstruction.
+**Mitigation / residual risk:** The implementation has no lock or compare-and-swap around the target write and Vault promotion. Under concurrent invocations, the PENDING version created by one invocation may be demoted to DEPRECATED when another invocation creates its own PENDING version. There is no guarantee that the invocation that writes last to the target is the same invocation that promotes its Vault version to CURRENT. In an adverse interleaving, Vault CURRENT and the rotation target could hold different credentials.
+
+The practical mitigation is operational: treat rotation for a given secret as single-flight. Avoid manual invocation while a scheduled or manual rotation is already in progress. OCI Audit and Function logs capture both invocations and their caller identities, which supports forensic reconstruction if overlap occurs.
+
+For this Object Storage demonstration target, manually re-triggering rotation once no other rotation is in flight should restore consistency: a successful single invocation overwrites the target and promotes the same credential to Vault CURRENT. For real targets that require the current credential to authenticate a rotation, this inconsistency may require target-specific break-glass recovery, such as resetting the credential through an administrative channel, then restoring Vault and the target to the same known-good value.
 
 ---
 
@@ -130,13 +134,15 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 ---
 
-### Operator workstation credentials
+## Operator Workstation Credentials
 
-**Out of scope for the runtime threat model, but noted for completeness:**
+**Out of scope for the runtime threat model, but noted for completeness.**
 
-No long-lived credentials are stored on OCI runtime resources — the rotation Function and Vault Secret both authenticate via Resource Principal. However, operators interact with this system using the OCI CLI, which stores a long-lived API key in `~/.oci/`. Compromise of an operator workstation could expose this key and allow an attacker to perform any OCI actions permitted by that IAM user, which may include invoking the Function, reading secret versions, or modifying IAM policy.
+**Threat:** Operators interact with this system using the OCI CLI, which stores a long-lived API key in `~/.oci/`. If an operator workstation is compromised, an attacker could use that key to perform any OCI actions permitted by the IAM user, which may include invoking the Function, reading secret versions, or modifying IAM policy.
 
-Mitigations at the operator level (outside this system's control):
+**Runtime boundary:** No long-lived credentials are stored on OCI runtime resources — the rotation Function and Vault Secret both authenticate via Resource Principal.
+
+**Mitigations at the operator level:**
 - Restrict OCI IAM user permissions to the minimum required for deployment and operations
 - Use OCI CLI profiles tied to IAM users with MFA enabled, and require MFA for console access
 - Rotate OCI API keys on a regular schedule and promptly revoke keys when team members leave the project

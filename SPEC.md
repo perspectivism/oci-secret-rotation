@@ -185,7 +185,7 @@ oci-secret-rotation/
 
 **This is the single most important operational rule.** Violate none of these.
 
-### What Claude Code must never do
+### What the AI coding assistant must never do
 
 - **Never** ask the user to paste credentials, private keys, API tokens, or passwords into the chat.
 - **Never** write credentials to any file committed to the repo.
@@ -196,7 +196,7 @@ oci-secret-rotation/
 
 All OCI authentication must flow through `~/.oci/config` on the user's local machine, which the user configures themselves using the OCI CLI. Terraform and the Python SDK both read this automatically.
 
-### Credential gates — when Claude Code must stop and prompt the user
+### Credential gates — when the AI coding assistant must stop and prompt the user
 
 **Gate 1 (before M2 — first terraform apply):**
 
@@ -291,11 +291,11 @@ Thumbs.db
 
 ## 7. Milestones
 
-**Gating rule: at the end of every milestone, Claude Code stops and summarizes what was completed, what the acceptance criteria showed, and asks for explicit approval to proceed to the next milestone.** Do not proceed without user confirmation.
+**Gating rule: at the end of every milestone, the AI coding assistant stops and summarizes what was completed, what the acceptance criteria showed, and asks for explicit approval to proceed to the next milestone.** Do not proceed without user confirmation.
 
 ### M0 — Scaffolding and design doc draft (no credentials needed)
 
-**Prerequisites:** `SPEC.md` and `AGENTS.md` already committed to the repo root. Claude Code must have read both before proposing the M0 plan.
+**Prerequisites:** `SPEC.md` and `AGENTS.md` already committed to the repo root. the AI coding assistant must have read both before proposing the M0 plan.
 
 **Goal:** Repo skeleton and written plan exist before any code.
 
@@ -615,7 +615,7 @@ Before declaring the project complete, verify every item:
 - [ ] README walkthrough reproduces the build from scratch
 - [ ] Every milestone's acceptance criteria were explicitly verified
 - [ ] All ADRs have status "Accepted" (not "Proposed")
-- [ ] All three Mermaid diagrams render correctly on GitHub (architecture in README + design doc, sequence in design doc, state in ADR 0003)
+- [ ] All four Mermaid diagrams render correctly on GitHub (architecture in README + design doc, sequence in design doc, state in ADR 0003)
 - [ ] Architecture diagrams in README and design doc are consistent — same components, same relationships
 - [ ] Design doc architecture diagram matches deployed reality
 - [ ] Runbook commands have been tested, not just written

@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Design Document
 
-**Status:** Accepted (M7)
-**Last updated:** 2026-04-22
+**Status:** Accepted
+**Last updated:** 2026-05-04
 
 ---
 
@@ -29,7 +29,7 @@ The result is a rotation system that is auditable (the Function emits structured
 
 ### Non-Goals
 
-- Multi-region replication (discussed in §10; not implemented)
+- Multi-region replication (discussed in [§10 — Future Work](#10-future-work); not implemented)
 - Admin UI or web endpoint
 - Multi-tenant isolation (single compartment is sufficient for a reference implementation)
 - Exhaustive test coverage (smoke tests and key unit tests only)
@@ -127,7 +127,7 @@ sequenceDiagram
     Note over VW: Previous CURRENT version<br/>moves to PREVIOUS (retained for rollback)
 ```
 
-**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version` fails — target untouched, state consistent, safe to retry; (2) `update_credential` fails after the pending version is created — CURRENT unchanged, target still consistent with CURRENT, re-trigger creates a fresh pending version; (3) `promote_to_current` fails after target update — target holds the new credential but CURRENT still reflects the old one, re-trigger recovers by overwriting both.
+**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version` fails — target untouched, state consistent, safe to retry; (2) `update_credential` fails after the pending version is created — CURRENT unchanged, target still consistent with CURRENT, re-trigger creates a fresh pending version; (3) `promote_to_current` fails after target update — target holds the new credential but CURRENT still reflects the old one; for this Object Storage demonstration target, re-triggering recovers by overwriting the target and promoting a fresh Vault version, but real targets that require the current credential to authenticate the update may need target-specific break-glass recovery.
 
 ---
 
@@ -143,11 +143,11 @@ The Function authenticates to OCI APIs using Resource Principal — OCI issues t
 
 ### Vault `DEFAULT` protection mode (software keys)
 
-Software-protected keys are used for this reference implementation. HSM-backed (`VIRTUAL_PRIVATE`) keys provide stronger non-exportability guarantees but cost significantly more and require a dedicated HSM partition. The upgrade path is documented in §10. The rotation *pattern* is identical regardless of key protection mode.
+Software-protected keys are used for this reference implementation. HSM-backed (`VIRTUAL_PRIVATE`) keys provide stronger non-exportability guarantees but cost significantly more and require a dedicated HSM partition. HSM-backed keys are noted as future work in [§10 — Future Work](#10-future-work). The rotation *pattern* is identical regardless of key protection mode.
 
 ### Single compartment
 
-Multi-compartment separation (e.g., separating the Vault from the Function) adds policy complexity without demonstrating additional patterns. A single compartment is sufficient for a reference implementation. Cross-compartment patterns are documented as future work in §10.
+Multi-compartment separation (e.g., separating the Vault from the Function) adds policy complexity without demonstrating additional patterns. A single compartment is sufficient for a reference implementation. Cross-compartment patterns are documented as future work in [§10 — Future Work](#10-future-work).
 
 ### Demo rotation target (Object Storage)
 
@@ -200,7 +200,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 **Rotation cadence tradeoffs.** More frequent rotation reduces the window of exposure for a compromised credential but increases the operational load on the target system and the risk of a partial-rotation window (the period between the target being updated and Vault confirming the new version). For most use cases, 30–90 day intervals balance risk reduction against operational noise.
 
-**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to CURRENT, the target holds a new credential that Vault does not know about. The recovery path — re-trigger rotation — is documented in the runbook. The state machine is designed to detect and recover from this case.
+**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to CURRENT, the target holds a new credential while Vault CURRENT still reflects the old one. For this Object Storage demonstration target, re-triggering rotation recovers by overwriting the target and promoting a fresh Vault version. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery. The recovery path is documented in the runbook.
 
 **Rollback path.** Previous secret versions are retained in Vault. Rolling back means promoting the previous version to `CURRENT` and re-applying the old credential to the target. The runbook documents the exact steps.
 

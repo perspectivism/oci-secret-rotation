@@ -1,7 +1,7 @@
 # ADR 0003: Rotation State Machine — Secret Version Lifecycle
 
 **Status:** Accepted
-**Date:** 2026-04-22
+**Date:** 2026-05-04
 
 ## Context
 
@@ -13,7 +13,7 @@ Three failure modes must be handled:
 2. **Target update fails** after a new version was written to Vault — Vault has an orphaned pending version; target still holds the old credential and is consistent with Vault CURRENT
 3. **Vault promote fails** after the target was updated — target holds the new credential but Vault CURRENT still reflects the old one; the two sides are inconsistent until the next rotation trigger
 
-The chosen ordering must minimize the blast radius of each failure mode and ensure that re-triggering rotation always converges to a consistent state.
+The chosen ordering must minimize the blast radius of each failure mode and ensure that re-triggering rotation converges to a consistent state when the target tolerates last-write-wins updates.
 
 ## Decision
 
@@ -33,7 +33,7 @@ This ordering is chosen because:
 
 - Failure at Phase 3 leaves both sides with the old credential — no inconsistency, safe to retry immediately
 - Failure at Phase 4 leaves Vault with an orphaned PENDING version but CURRENT unchanged — target is still consistent with CURRENT, and re-triggering rotation demotes the orphan and retries cleanly
-- Failure at Phase 5 is the only inconsistent case, but it is recoverable: re-triggering rotation overwrites the target again and retries the promote; both sides converge on a new credential
+- Failure at Phase 5 is the only inconsistent case, but it is recoverable: re-triggering rotation overwrites the target again and promotes a fresh Vault version; for targets that tolerate last-write-wins updates, both sides converge on a new credential
 
 The state diagram below shows the lifecycle of a single secret version through these phases, including the abandonment path for orphaned versions:
 
@@ -51,7 +51,7 @@ stateDiagram-v2
 
 **Orphaned PENDING (Phase 4 failure):** When `update_credential()` raises `TargetUpdateError`, the PENDING version in Vault is abandoned. CURRENT still holds the old credential, so Vault and target are consistent with each other. Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned PENDING to DEPRECATED when the new PENDING is created. The rotation proceeds from a clean state.
 
-**Inconsistent state (Phase 5 failure):** When `promote_to_current()` raises after the target has been updated, the target holds the new credential but Vault CURRENT reflects the old one. The rotation code logs this explicitly as `INCONSISTENT STATE`. Re-triggering rotation generates another new credential, overwrites the target (which accepts the new value as a last-write-wins overwrite), writes a new PENDING version to Vault, and promotes it. Both sides converge.
+**Inconsistent state (Phase 5 failure):** When `promote_to_current()` raises after the target has been updated, the target holds the new credential but Vault CURRENT reflects the old one. The rotation code logs this explicitly as `INCONSISTENT STATE`. Re-triggering rotation generates another new credential, writes a new PENDING version to Vault, overwrites the target, and promotes the new Vault version to CURRENT. For targets that tolerate last-write-wins updates, both sides converge on a new credential. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery.
 
 ## Consequences
 

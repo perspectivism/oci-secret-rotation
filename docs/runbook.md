@@ -267,7 +267,7 @@ oci fn function invoke \
   --file "-"
 ```
 
-A successful rotation returns `{"status": "ok", ...}`. If the response is an error, check OCI Logging for the stack trace (see §2 — Investigate a Failure).
+A successful rotation returns `{"status": "ok", ...}`. If the response is an error, check OCI Logging for the stack trace (see [§2 — Investigate a Failure](#2-investigate-a-failure)).
 
 ---
 
