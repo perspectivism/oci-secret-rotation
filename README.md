@@ -14,7 +14,7 @@ graph TD
     FN["OCI Function<br/>(Python rotation handler)"]
     OS["Object Storage Bucket<br/>(rotation target)"]
     LG["OCI Logging"]
-    ONS["ONS Topic<br/>(email / webhook)"]
+    ONS["ONS Topic<br/>(email)"]
     DG["IAM Dynamic Group<br/>+ Policies"]
 
     VS -- "invokes on schedule" --> FN

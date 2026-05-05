@@ -12,7 +12,7 @@ Source the environment script once per shell session before running any commands
 source scripts/set-env.sh
 ```
 
-This reads all OCIDs and names from `terraform output` and exports them as shell variables. Requires Terraform state to be initialised and a successful `terraform apply`.
+This calls `terraform output -json` once and uses `jq` to export the values as shell variables. Requires Terraform state to be initialised and a successful `terraform apply`.
 
 To build and push a new Function image, use the helper script — it handles OCIR authentication, repository creation, and the push in one step:
 
@@ -197,7 +197,7 @@ printf '%s' "$ROLLED_BACK_CRED" | oci os object put \
   --force
 ```
 
-Vault and the target are now consistent. Invoke the function to resume normal operation and confirm the new credential propagates correctly.
+Vault and the target are now consistent. Verify that the credential value read from Vault in Step 3 matches the value in the Object Storage target before proceeding. Let the next scheduled rotation run rather than immediately invoking the Function — re-triggering right after a manual rollback risks entering another inconsistent state if the target requires the current credential to authenticate the update.
 
 ---
 

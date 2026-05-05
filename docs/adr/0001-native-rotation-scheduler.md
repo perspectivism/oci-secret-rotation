@@ -1,7 +1,7 @@
 # ADR 0001: Use Native OCI Vault Rotation Scheduling
 
 **Status:** Accepted
-**Date:** 2026-04-22
+**Date:** 2026-05-04
 
 ## Context
 
@@ -37,7 +37,7 @@ rotation_config {
 - The Vault Secret authenticates via Resource Principal through a dedicated dynamic group matched to its specific OCID; no separate API key is required for the scheduler
 
 **Harder:**
-- `rotation_config` requires the Function OCID at secret creation time, creating a circular Terraform dependency: the secret needs the Function OCID, and the Function app config needs the secret OCID. This is sidestepped by declaring `function_ocid` as a static input variable in `terraform.tfvars` rather than wiring it from the function module output. The OCID is stable after initial deployment and changes only if the Function resource is destroyed and recreated.
+- `rotation_config` requires the Function OCID before scheduled rotation can be configured, creating a circular Terraform dependency: the secret needs the Function OCID, and the Function app config needs the secret OCID. This is sidestepped by declaring `function_ocid` as a static input variable in `terraform.tfvars` rather than wiring it from the function module output. The OCID is stable after initial deployment and changes only if the Function resource is destroyed and recreated.
 - Schedule granularity is calendar-based (ISO 8601 duration, minimum one day). Sub-daily rotation is not supported.
 - Disabling auto-rotation is required before OCI will schedule a secret for deletion — a non-obvious operational step that must be performed before `terraform destroy` can remove a secret. Documented in the runbook.
 

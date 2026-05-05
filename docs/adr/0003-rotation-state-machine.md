@@ -40,13 +40,12 @@ The state diagram below shows the lifecycle of a single secret version through t
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> Pending : Phase 3 — create_pending_version()
-    Pending --> Current : Phase 5 — promote_to_current()
-    Current --> Previous : automatic — new version promoted
-    Previous --> Deprecated : new version promoted to Current
-    Deprecated --> [*] : operator schedules explicit deletion
-
-    Pending --> Deprecated : orphaned on re-trigger
+    [*] --> Pending : Phase 3 success — create_pending_version()
+    Pending --> Current : Phase 5 success — promote_to_current()
+    Pending --> Deprecated : Phase 4/5 failure — demoted when re-trigger creates new PENDING
+    Current --> Previous : automatic on next promotion
+    Previous --> Deprecated : automatic on next completed rotation
+    Deprecated --> [*] : permanently deleted after scheduled retention period expires
 ```
 
 **Orphaned PENDING (Phase 4 failure):** When `update_credential()` raises `TargetUpdateError`, the PENDING version in Vault is abandoned. CURRENT still holds the old credential, so Vault and target are consistent with each other. Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned PENDING to DEPRECATED when the new PENDING is created. The rotation proceeds from a clean state.

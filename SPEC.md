@@ -473,7 +473,7 @@ Thumbs.db
 - `docs/design.md`: full design doc with two Mermaid diagrams — (a) a detailed **architecture diagram** showing components, boundaries, and data flow, and (b) a **rotation sequence diagram** showing the end-to-end flow of a rotation event from scheduler trigger through audit log emission. Design decisions, tradeoffs, and future work section covering multi-region and cross-tenancy.
 - `docs/adr/0001-native-rotation-scheduler.md`: why native scheduling over custom cron; when you'd deviate
 - `docs/adr/0002-resource-principal-auth.md`: why Resource Principals; alternatives considered
-- `docs/adr/0003-rotation-state-machine.md`: pending/current/retired lifecycle and why, including a Mermaid **state diagram** showing transitions and failure paths (rollback on target update failure)
+- `docs/adr/0003-rotation-state-machine.md`: `PENDING`/`CURRENT`/`PREVIOUS`/`DEPRECATED` lifecycle and why, including a Mermaid **state diagram** showing transitions and failure handling (re-trigger recovery on target update failure)
 - `docs/threat-model.md`: STRIDE analysis covering rotation Function compromise, Vault access compromise, target system compromise, partial-rotation failure, replay attacks
 - `docs/runbook.md`: operational procedures for manual rotation, rollback to previous version, failure investigation, secret version pruning, full destroy
 - `README.md`: polished, with a simplified Mermaid **architecture diagram** above the fold (before the quickstart), quickstart instructions, and links to the design doc and ADRs
@@ -482,7 +482,7 @@ Thumbs.db
 - A reviewer can read the README and understand the project in 5 minutes
 - A reviewer can read the design doc and understand the tradeoffs in 15 minutes
 - Every ADR follows a consistent format: Context → Decision → Consequences → Alternatives Considered
-- All three Mermaid diagrams (architecture, sequence, state) render correctly when the markdown files are viewed on GitHub
+- All four Mermaid diagrams render correctly on GitHub: README architecture, design-doc architecture, rotation sequence, and rotation state
 - Architecture diagram in README matches the more detailed version in `docs/design.md` — same components, same relationships, just with less detail
 
 **Stop gate:** Review all written artifacts with user.
@@ -521,7 +521,7 @@ Required sections, in order:
 3. **Architecture** — Mermaid architecture diagram + prose walkthrough of components and boundaries
 4. **Rotation flow** — Mermaid sequence diagram showing the end-to-end rotation: scheduler trigger, Function invocation, target update, Vault version write, audit log emission
 5. **Design decisions** — key choices with rationale
-6. **Rotation state machine** — pending → current → retired flow, with failure recovery; reference ADR 0003 for the state diagram
+6. **Rotation state machine** — `PENDING` → `CURRENT` → `PREVIOUS` → `DEPRECATED` lifecycle, with failure handling and re-trigger recovery; reference ADR 0003 for the state diagram
 7. **Security model** — trust boundaries, authentication model, least-privilege scoping
 8. **Observability model** — what's logged, what's alerted, how to investigate
 9. **Operational considerations** — rotation cadence tradeoffs, blast radius of failure, rollback path
@@ -585,16 +585,16 @@ Each ADR follows this format:
 
 All diagrams are authored in Mermaid and embedded directly in the relevant markdown files so they render natively on GitHub. No PNGs, no external diagrams.net files. If a diagram would require more than about ten nodes or eight sequence participants to express, split it into multiple focused diagrams rather than one crowded one.
 
-Three required diagrams:
+Four required diagrams (the architecture diagram appears in two files — a simplified version in README and a detailed version in design.md):
 
 **1. Architecture diagram — `README.md` (simplified) and `docs/design.md` (detailed).**
 A static component view showing Vault, the rotation Function, the target system, logging/events, and the IAM relationships (dynamic group, policies). The README version stays high-level; the design doc version shows compartment boundaries, subnet topology if relevant, and the specific IAM principals involved. Both versions must show the same components and relationships — a reviewer should not find contradictions between them.
 
 **2. Rotation sequence diagram — `docs/design.md`.**
-A Mermaid `sequenceDiagram` showing the end-to-end flow of a rotation event: Vault scheduler triggers, Function is invoked, Function reads the current secret, Function writes the new version to Vault as pending, Function provisions a new credential on the target, Function promotes pending to current, Vault emits the version-created event, audit log is written. Include notes on retained previous versions for rollback.
+A Mermaid `sequenceDiagram` showing the end-to-end flow of a rotation event: Vault scheduler triggers, Function is invoked, Function reads the current secret, Function writes the new version to Vault as `PENDING`, Function provisions a new credential on the target, Function promotes `PENDING` to `CURRENT`, Function publishes a notification to the ONS topic. Include notes on retained previous versions for rollback.
 
 **3. Rotation state diagram — `docs/adr/0003-rotation-state-machine.md`.**
-A Mermaid `stateDiagram-v2` showing secret version states (Pending, Current, Previous, Deprecated) and transitions, including the rollback path when target update fails after a pending version is written. This is where the distributed-systems reasoning becomes visually explicit.
+A Mermaid `stateDiagram-v2` showing secret version states (`PENDING`, `CURRENT`, `PREVIOUS`, `DEPRECATED`) and transitions, including failure handling and the re-trigger recovery path when target update fails after a pending version is written. This is where the distributed-systems reasoning becomes visually explicit.
 
 Diagrams are first-class deliverables, not decoration. They must match the deployed reality at project close — if the implementation deviates from the original diagram, update the diagram, don't paper over the mismatch.
 

@@ -20,7 +20,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** An unauthorized principal invokes the rotation Function to trigger an unsolicited rotation, cause unnecessary credential churn, or attempt to observe the new credential by controlling the target.
 
 **Mitigation:**
-- A dedicated IAM dynamic group matches the specific Vault Secret OCID (`resource.type = 'vaultsecret', resource.id = '<ocid>'`). Only that dynamic group is granted `use fn-invocation` scoped to the specific Function OCID (`where target.function.id = '...'`). No other principal — including the operator who provisioned the infrastructure — holds `fn-invocation` on the Function unless explicitly granted separately.
+- A dedicated IAM dynamic group matches the specific Vault Secret OCID (`resource.type = 'vaultsecret', resource.id = '<ocid>'`). Only that dynamic group is granted `use fn-invocation` scoped to the specific Function OCID (`where target.function.id = '...'`). Within the policies provisioned by this system, no other principal — including the operator who provisioned the infrastructure — holds `fn-invocation` on the Function.
 - Direct invocation via `oci fn function invoke` requires IAM `functions:invokeFunction` scoped to the Function OCID. Only principals explicitly granted this permission in IAM can invoke the Function directly.
 - OCI Functions does not expose an unauthenticated HTTP endpoint. Every invocation path requires a signed OCI API request; unsigned requests are rejected at the API gateway layer.
 
@@ -45,7 +45,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Mitigation:**
 - **OCI Audit** captures API calls such as Vault reads, Vault writes, Function invocations, and ONS publishes, including caller identity (such as the Function OCID for Resource Principal calls), timestamp, request ID, and source IP. OCI Audit cannot be disabled at the tenancy level; it is managed by OCI and is available for forensic reconstruction. Note: object-level `put_object` operations are not captured by OCI Audit; capture them with Object Storage service logs if needed. The rotation Function's structured log entry at the `target_update` phase provides the application-level evidence of the write.
 - The rotation Function emits structured JSON log entries to OCI Logging at each phase (`start`, `read`, `vault_pending`, `target_update`, `vault_promote`, `complete`). Each entry includes the secret OCID, phase name, and version number where relevant.
-- After each successful rotation the Function publishes a message to the ONS topic. The message includes the secret OCID, status, and is delivered to subscribed endpoints (email, HTTPS webhook). This provides an out-of-band confirmation trail independent of OCI Logging.
+- After each successful rotation the Function publishes a message to the ONS topic. The message includes the secret OCID and status, and is delivered to subscribed email endpoints. This provides an out-of-band confirmation trail independent of OCI Logging.
 - Vault retains secret versions until explicitly pruned, subject to OCI Vault version limits. Any retained previous version can be retrieved by version number (`oci secrets secret-bundle get --version-number <N>`), enabling forensic reconstruction of the credential sequence.
 
 ---
