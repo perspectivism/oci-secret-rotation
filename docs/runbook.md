@@ -114,7 +114,7 @@ A successful rotation returns `{"status": "ok", ...}`. An error returns `{"error
 | `expected new version to be PENDING` | Secret is missing `rotation_config` or Vault returned unexpected rotation state | New version may have been created; target not updated | Fix `rotation_config`, inspect versions, retry |
 | `failed to write credential to object storage` | IAM policy missing for bucket write or bucket deleted | New secret version created, target NOT updated | Restore IAM policy, retry rotation |
 | `rotation succeeded but notification failed` | IAM policy for ONS missing or propagating | Rotation complete, email not sent | Wait 60s, retry; or check IAM policy |
-| Function returns HTTP 502 / FunctionInvokeExecutionFailed | Unhandled exception in function code | Unknown | Check OCI Logging for stack trace |
+| Function returns `HTTP 502` / `FunctionInvokeExecutionFailed` | Unhandled exception in function code | Unknown | Check OCI Logging for stack trace |
 | Function times out (120s) | Target system unreachable or very slow | Unknown — partial state possible | Check VCN/service gateway, check target |
 
 ### List all secret versions and their stages
@@ -169,7 +169,7 @@ oci vault secret-version list \
 
 Note the version number with stage `PREVIOUS` (or whichever version you want to restore).
 
-**Step 2 — Promote the previous version back to CURRENT in Vault:**
+**Step 2 — Promote the previous version back to `CURRENT` in Vault:**
 
 ```bash
 oci vault secret update \

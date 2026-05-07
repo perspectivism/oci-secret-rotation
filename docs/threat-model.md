@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Threat Model
 
 **Status:** Accepted
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-06
 
 ---
 
@@ -69,7 +69,7 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 
 **Mitigation:**
 - OCI Functions and OCI Vault are managed services with OCI SLAs. Transient failures should be investigated through logs; retry behavior of the Vault scheduler has not been validated empirically and should not be assumed.
-- A failed rotation does **not** invalidate the current credential. The CURRENT version in Vault remains valid and usable until a successful rotation completes. The system degrades gracefully — credentials continue to work, just without renewal.
+- A failed rotation does **not** invalidate the current credential. The `CURRENT` version in Vault remains valid and usable until a successful rotation completes. The system degrades gracefully — credentials continue to work, just without renewal.
 - The 30-day default rotation interval provides a large window before a missed rotation becomes operationally significant. Manual rotation (`oci vault secret rotate`) can be used as an out-of-band fallback when IAM and rotation configuration are healthy.
 - The Function has a 120-second timeout (`timeout_in_seconds = 120`). An unreachable or unresponsive target causes a clean timeout and a logged failure rather than a hung invocation.
 - The Function emits structured log entries for failed rotation phases, which are captured in OCI Logging when function logging is enabled. The runbook provides exact CLI queries to investigate missed rotations.
@@ -81,10 +81,11 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** The rotation Function reads or modifies secrets, buckets, or other OCI resources beyond its explicitly authorized scope.
 
 **Mitigation:**
-- **Secret scope:** IAM policy restricts secret-family access with `where target.secret.id = '<ocid>'`. Even if the dynamic group matching rule were broadened, the policy condition limits the effective secret scope to the single secret OCID.
+- **Secret scope:** IAM policy restricts `secret-family` access with `where target.secret.id = '<ocid>'`. Even if the dynamic group matching rule were broadened, the policy condition limits the effective secret scope to the single secret OCID.
 - **Bucket scope:** IAM policy restricts Object Storage access with `where target.bucket.name = '<name>'`. The Function cannot read or write any other bucket in the compartment.
 - **Dynamic group scope:** The matching rule uses `ALL {resource.type = 'fnfunc', resource.id = '<ocid>'}`. Both conditions must match: the resource must be a Function and must have the specific OCID. Any other Function deployed in the same compartment does not match.
 - **Compartment scope:** All policies are `in compartment id <ocid>` — not `in tenancy`. A misconfigured policy cannot grant access outside the specific compartment.
+- **Network egress scope:** The Function application runs in a private subnet with no public IPs, no Internet Gateway, and no NAT Gateway. Its route table and security list allow outbound HTTPS only to the Oracle Services Network through a Service Gateway. This prevents the rotation code from reaching arbitrary public internet endpoints for data exfiltration; access to OCI services is still governed by IAM policy.
 
 ---
 
@@ -94,21 +95,21 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 ### Target updated, Vault promote fails
 
-**Scenario:** Phase 3 (`create_pending_version`) and Phase 4 (`update_credential`) both succeed — a PENDING version exists in Vault and Object Storage holds the new credential — but Phase 5 (`promote_to_current`) fails.
+**Scenario:** Phase 3 (`create_pending_version`) and Phase 4 (`update_credential`) both succeed — a `PENDING` version exists in Vault and Object Storage holds the new credential — but Phase 5 (`promote_to_current()`) fails.
 
-**State:** Object Storage and Vault CURRENT are inconsistent. See [ADR 0003](adr/0003-rotation-state-machine.md) for the full ordering rationale.
+**State:** Object Storage and Vault `CURRENT` are inconsistent. See [ADR 0003](adr/0003-rotation-state-machine.md) for the full ordering rationale.
 
-**Recovery:** Re-triggering rotation generates a fresh credential, overwrites the target (last-write-wins), writes a new PENDING version to Vault, and promotes it. Both sides converge on the new credential.
+**Recovery:** Re-triggering rotation generates a fresh credential, overwrites the target (last-write-wins), writes a new `PENDING` version to Vault, and promotes it. Both sides converge on the new credential.
 
 ---
 
-### Vault PENDING written, target update fails
+### Vault `PENDING` written, target update fails
 
-**Scenario:** `create_pending_version()` (Phase 3) succeeds — a PENDING version exists in Vault — but `update_credential()` (Phase 4) raises `TargetUpdateError`.
+**Scenario:** `create_pending_version()` (Phase 3) succeeds — a `PENDING` version exists in Vault — but `update_credential()` (Phase 4) raises `TargetUpdateError`.
 
-**State:** Vault has an orphaned PENDING version. CURRENT still holds the old credential. Target is consistent with CURRENT.
+**State:** Vault has an orphaned `PENDING` version. `CURRENT` still holds the old credential. Target is consistent with `CURRENT`.
 
-**Recovery:** Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned PENDING to DEPRECATED when the new PENDING is created (empirically verified). Rotation proceeds from a consistent state. See [ADR 0003](adr/0003-rotation-state-machine.md).
+**Recovery:** Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned `PENDING` to `DEPRECATED` when the new `PENDING` is created (empirically verified). Rotation proceeds from a consistent state. See [ADR 0003](adr/0003-rotation-state-machine.md).
 
 ---
 
@@ -118,11 +119,11 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 **State:** Two Function invocations execute concurrently, each generating a different credential and racing to write to Vault and Object Storage.
 
-**Mitigation / residual risk:** The implementation has no lock or compare-and-swap around the target write and Vault promotion. Under concurrent invocations, the PENDING version created by one invocation may be demoted to DEPRECATED when another invocation creates its own PENDING version. There is no guarantee that the invocation that writes last to the target is the same invocation that promotes its Vault version to CURRENT. In an adverse interleaving, Vault CURRENT and the rotation target could hold different credentials.
+**Mitigation / residual risk:** The implementation has no lock or compare-and-swap around the target write and Vault promotion. Under concurrent invocations, the `PENDING` version created by one invocation may be demoted to `DEPRECATED` when another invocation creates its own `PENDING` version. There is no guarantee that the invocation that writes last to the target is the same invocation that promotes its Vault version to `CURRENT`. In an adverse interleaving, Vault `CURRENT` and the rotation target could hold different credentials.
 
 The practical mitigation is operational: treat rotation for a given secret as single-flight. Avoid manual invocation while a scheduled or manual rotation is already in progress. OCI Audit and Function logs capture both invocations and their caller identities, which supports forensic reconstruction if overlap occurs.
 
-For this Object Storage demonstration target, manually re-triggering rotation once no other rotation is in flight should restore consistency: a successful single invocation overwrites the target and promotes the same credential to Vault CURRENT. For real targets that require the current credential to authenticate a rotation, this inconsistency may require target-specific break-glass recovery, such as resetting the credential through an administrative channel, then restoring Vault and the target to the same known-good value.
+For this Object Storage demonstration target, manually re-triggering rotation once no other rotation is in flight should restore consistency: a successful single invocation overwrites the target and promotes the same credential to Vault `CURRENT`. For real targets that require the current credential to authenticate a rotation, this inconsistency may require target-specific break-glass recovery, such as resetting the credential through an administrative channel, then restoring Vault and the target to the same known-good value.
 
 ---
 

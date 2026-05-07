@@ -57,7 +57,7 @@ In priority order:
 │  │    • Dynamic group matching Function OCID                 │  │
 │  │    • Policy: DG can manage secret-family (secret OCID)    │  │
 │  │    • Policy: DG can manage objects (target bucket)        │  │
-│  │    • Policy: DG can use ons-topics                        │  │
+│  │    • Policy: DG can use ons-topics (PublishMessage only)  │  │
 │  │    • Dynamic group matching Vault Secret OCID can         │  │
 │  │      invoke Function                                      │  │
 │  └───────────────────────────────────────────────────────────┘  │
@@ -380,7 +380,7 @@ Thumbs.db
 
 **Deliverables:**
 - `function/func.py`: handler entry point with structured logging
-- `function/rotation.py`: rotation state machine (pending → current → retire old)
+- `function/rotation.py`: rotation state machine (`PENDING` → `CURRENT` → `PREVIOUS` → `DEPRECATED`)
 - `function/vault_client.py`: Vault SDK wrapper with explicit error handling
 - `function/target_client.py`: mock target client — rotates credentials against an in-memory store or an Object Storage object
 - `function/tests/test_rotation.py`: unit tests covering happy path, target-update-fails-after-vault-write, and Vault-write-fails paths
@@ -452,7 +452,7 @@ Thumbs.db
 - Rotation Function publishes directly to ONS topic after each successful rotation
   (OCI Events Service does not expose secret version lifecycle events; direct publish is more reliable)
 - ONS email subscription confirmed and receiving rotation notifications
-- IAM policy restricting the Function's ONS publish permission to the `PublishMessage` operation across ons-topics in the compartment (per-topic OCID scoping is not supported by OCI IAM for ons-topics)
+- IAM policy restricting the Function's ONS publish permission to the `PublishMessage` operation across `ons-topics` in the compartment (per-topic OCID scoping is not supported by OCI IAM for `ons-topics`)
 - Log search queries documented in runbook
 - Verification: trigger another rotation, confirm email received, OCI Logging entry visible
 
@@ -470,7 +470,7 @@ Thumbs.db
 **Goal:** All written deliverables are reviewer-ready.
 
 **Deliverables:**
-- `docs/design.md`: full design doc with two Mermaid diagrams — (a) a detailed **architecture diagram** showing components, boundaries, and data flow, and (b) a **rotation sequence diagram** showing the end-to-end flow of a rotation event from scheduler trigger through audit log emission. Design decisions, tradeoffs, and future work section covering multi-region and cross-tenancy.
+- `docs/design.md`: full design doc with three Mermaid diagrams — (a) a **runtime architecture diagram** showing components, boundaries, and data flow, (b) a **rotation sequence diagram** showing the end-to-end flow of a rotation event from scheduler trigger through audit log emission, and (c) an **IAM authorization diagram** (under §7 Security Model) showing dynamic groups, policies, and the scoped permissions granted to each principal. Design decisions, tradeoffs, and future work section covering multi-region and cross-tenancy.
 - `docs/adr/0001-native-rotation-scheduler.md`: why native scheduling over custom cron; when you'd deviate
 - `docs/adr/0002-resource-principal-auth.md`: why Resource Principals; alternatives considered
 - `docs/adr/0003-rotation-state-machine.md`: `PENDING`/`CURRENT`/`PREVIOUS`/`DEPRECATED` lifecycle and why, including a Mermaid **state diagram** showing transitions and failure handling (re-trigger recovery on target update failure)
@@ -482,7 +482,7 @@ Thumbs.db
 - A reviewer can read the README and understand the project in 5 minutes
 - A reviewer can read the design doc and understand the tradeoffs in 15 minutes
 - Every ADR follows a consistent format: Context → Decision → Consequences → Alternatives Considered
-- All four Mermaid diagrams render correctly on GitHub: README architecture, design-doc architecture, rotation sequence, and rotation state
+- All five Mermaid diagrams render correctly on GitHub: README architecture, design-doc runtime architecture, design-doc IAM authorization, rotation sequence, and rotation state
 - Architecture diagram in README matches the more detailed version in `docs/design.md` — same components, same relationships, just with less detail
 
 **Stop gate:** Review all written artifacts with user.
@@ -585,15 +585,18 @@ Each ADR follows this format:
 
 All diagrams are authored in Mermaid and embedded directly in the relevant markdown files so they render natively on GitHub. No PNGs, no external diagrams.net files. If a diagram would require more than about ten nodes or eight sequence participants to express, split it into multiple focused diagrams rather than one crowded one.
 
-Four required diagrams (the architecture diagram appears in two files — a simplified version in README and a detailed version in design.md):
+Four diagram types are required, producing five Mermaid diagrams total (the runtime architecture diagram appears in both README and design.md):
 
-**1. Architecture diagram — `README.md` (simplified) and `docs/design.md` (detailed).**
-A static component view showing Vault, the rotation Function, the target system, logging/events, and the IAM relationships (dynamic group, policies). The README version stays high-level; the design doc version shows compartment boundaries, subnet topology if relevant, and the specific IAM principals involved. Both versions must show the same components and relationships — a reviewer should not find contradictions between them.
+**1. Runtime architecture diagram — `README.md` (simplified) and `docs/design.md` (detailed).**
+A static component view showing Vault, the rotation Function, the target system, and logging/notifications. The README version stays high-level; the design doc version shows compartment boundaries and data flow edges. Both versions must show the same components and relationships — a reviewer should not find contradictions between them.
 
-**2. Rotation sequence diagram — `docs/design.md`.**
+**2. IAM authorization diagram — `docs/design.md` (§7 Security Model).**
+A `graph TD` diagram showing the two dynamic groups, their policy grants, and the scoped permissions for each principal. Separate from the runtime diagram because authorization is control-plane, not data-plane.
+
+**3. Rotation sequence diagram — `docs/design.md`.**
 A Mermaid `sequenceDiagram` showing the end-to-end flow of a rotation event: Vault scheduler triggers, Function is invoked, Function reads the current secret, Function writes the new version to Vault as `PENDING`, Function provisions a new credential on the target, Function promotes `PENDING` to `CURRENT`, Function publishes a notification to the ONS topic. Include notes on retained previous versions for rollback.
 
-**3. Rotation state diagram — `docs/adr/0003-rotation-state-machine.md`.**
+**4. Rotation state diagram — `docs/adr/0003-rotation-state-machine.md`.**
 A Mermaid `stateDiagram-v2` showing secret version states (`PENDING`, `CURRENT`, `PREVIOUS`, `DEPRECATED`) and transitions, including failure handling and the re-trigger recovery path when target update fails after a pending version is written. This is where the distributed-systems reasoning becomes visually explicit.
 
 Diagrams are first-class deliverables, not decoration. They must match the deployed reality at project close — if the implementation deviates from the original diagram, update the diagram, don't paper over the mismatch.
@@ -615,7 +618,7 @@ Before declaring the project complete, verify every item:
 - [ ] README walkthrough reproduces the build from scratch
 - [ ] Every milestone's acceptance criteria were explicitly verified
 - [ ] All ADRs have status "Accepted" (not "Proposed")
-- [ ] All four Mermaid diagrams render correctly on GitHub (architecture in README + design doc, sequence in design doc, state in ADR 0003)
+- [ ] All five Mermaid diagrams render correctly on GitHub (runtime architecture in README + design doc, IAM authorization in design doc §7, sequence in design doc, state in ADR 0003)
 - [ ] Architecture diagrams in README and design doc are consistent — same components, same relationships
 - [ ] Design doc architecture diagram matches deployed reality
 - [ ] Runbook commands have been tested, not just written

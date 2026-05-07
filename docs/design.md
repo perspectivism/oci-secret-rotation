@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Design Document
 
 **Status:** Accepted
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-06
 
 ---
 
@@ -41,14 +41,6 @@ The result is a rotation system that is auditable (the Function emits structured
 
 ```mermaid
 graph TD
-    subgraph tenancy["Tenancy-level IAM"]
-        DG1["Dynamic Group<br/>(specific Function OCID)"]
-        DG2["Dynamic Group<br/>(specific Vault Secret OCID)"]
-        POL["IAM Policies<br/>(compartment-scoped permissions)"]
-        DG1 -. "principal matched by" .-> POL
-        DG2 -. "principal matched by" .-> POL
-    end
-
     subgraph compartment["Compartment: secret-rotation"]
         subgraph vault_group["OCI Vault"]
             KMS["KMS Master Key"]
@@ -62,38 +54,32 @@ graph TD
             FNA --> FN
         end
 
-        MT["Object Storage bucket<br/>(rotation target)"]
+        MT["Object Storage bucket<br/>(demo rotation target)"]
 
         subgraph obs["Observability"]
             LG["OCI Logging"]
             NT["Notifications Topic<br/>(ONS)"]
         end
 
-        SEC -- "Secret Rotation Service invokes on schedule" --> FN
-        FN -- "rotates credential on" --> MT
-        FN -- "writes pending/current secret version" --> SEC
-        FN -- "publishes success notification" --> NT
+        SEC -- "invokes on rotation schedule" --> FN
+        FN -- "reads/writes secret versions" --> SEC
+        FN -- "updates demo credential" --> MT
         FN -- "emits structured logs" --> LG
-
-        POL -. "allows Function to manage target secret by OCID" .-> SEC
-        POL -. "allows Function to write target bucket" .-> MT
-        POL -. "allows Function to publish to ons-topics (operation-scoped)" .-> NT
-        POL -. "allows Vault Secret to invoke target Function" .-> FN
-
-        FN -. "matched as fnfunc" .-> DG1
-        SEC -. "matched as vaultsecret" .-> DG2
+        FN -- "publishes success notification" --> NT
     end
 ```
+
+IAM authorization is shown separately in [§7 — Security Model](#7-security-model) — it governs access control, not runtime data flow.
 
 ### Component walkthrough
 
 **OCI Vault + KMS key.** The Vault holds the secret and its version history. A customer-managed KMS master key encrypts secret material at rest. The secret resource carries a `rotation_config` that specifies the rotation interval and the target Function OCID — this is what drives the schedule without any custom cron infrastructure.
 
-**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, writes a pending version to Vault, updates the Object Storage target, then promotes the pending version to current. It authenticates to OCI APIs using Resource Principal. The Function is included in a narrowly scoped dynamic group by matching its OCID; OCI then issues temporary resource principal credentials to the runtime, so no user API key or static credential is stored in the code.
+**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, writes a `PENDING` version to Vault, updates the Object Storage target, then promotes the `PENDING` version to `CURRENT`. It authenticates to OCI APIs using Resource Principal. The Function is included in a narrowly scoped dynamic group by matching its OCID; OCI then issues temporary resource principal credentials to the runtime, so no user API key or static credential is stored on the Function. The Function application runs in a private subnet in the project VCN and reaches OCI services through a service gateway; the rotation handler is invoked through the OCI Functions API, with access authorized by IAM, not through a public HTTP endpoint.
 
 **Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
 
-**IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS. The second matches the specific Vault Secret OCID and is granted compartment-scoped `read fn-function` plus Function-OCID-scoped `use fn-invocation` so the Vault Secret's Resource Principal can invoke only the target Function — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a Resource Principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
+**IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS topics in the compartment (`PublishMessage` only). The second matches the specific Vault Secret OCID and is granted compartment-scoped `read fn-function` plus Function-OCID-scoped `use fn-invocation` so the Vault Secret's Resource Principal can invoke only the target Function — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a Resource Principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
 
 **OCI Logging + Notifications.** The Function emits structured JSON logs to OCI Logging on every invocation. After a successful rotation it publishes directly to an ONS topic, which delivers an email notification. OCI Events Service does not expose secret version lifecycle events — so direct publish from the Function is used instead.
 
@@ -124,10 +110,10 @@ sequenceDiagram
     VW-->>FN: version promoted to CURRENT
     FN--)LG: structured logs for each rotation phase
     FN--)ONS: publish_message (rotation complete)
-    Note over VW: The CURRENT version becomes PREVIOUS (retained for rollback)
+    Note over VW: The old CURRENT version becomes PREVIOUS (retained for rollback)
 ```
 
-**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version` fails — target untouched, state consistent, safe to retry; (2) `update_credential` fails after the pending version is created — CURRENT unchanged, target still consistent with CURRENT, re-trigger creates a fresh pending version; (3) `promote_to_current` fails after target update — target holds the new credential but CURRENT still reflects the old one; for this Object Storage demonstration target, re-triggering recovers by overwriting the target and promoting a fresh Vault version, but real targets that require the current credential to authenticate the update may need target-specific break-glass recovery.
+**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version()` fails — target untouched, state consistent, safe to retry; (2) `update_credential()` fails after the `PENDING` version is created — `CURRENT` unchanged, target still consistent with `CURRENT`, re-trigger creates a fresh `PENDING` version; (3) `promote_to_current()` fails after target update — target holds the new credential but `CURRENT` still reflects the old one; for this Object Storage demonstration target, re-triggering recovers by overwriting the target and promoting a fresh Vault version, but real targets that require the current credential to authenticate the update may need target-specific break-glass recovery.
 
 ---
 
@@ -161,7 +147,7 @@ Rotating against a real database or third-party API introduces external dependen
 
 Secret versions move through the following states: `PENDING` → `CURRENT` → `PREVIOUS` → `DEPRECATED`. The Function drives the `PENDING → CURRENT` transition. The Vault automatically moves the former `CURRENT` to `PREVIOUS` when a new version is promoted.
 
-The full state diagram — including failure handling and the re-trigger recovery path when target update fails after a pending version has been written — is in [ADR 0003](adr/0003-rotation-state-machine.md).
+The full state diagram — including failure handling and the re-trigger recovery path when target update fails after a `PENDING` version has been written — is in [ADR 0003](adr/0003-rotation-state-machine.md).
 
 ---
 
@@ -172,6 +158,39 @@ The full state diagram — including failure handling and the re-trigger recover
 **Authentication model.** No component holds a long-lived credential. The Function authenticates via Resource Principal — OCI issues temporary credentials to the runtime based on its dynamic group membership. The Vault Secret also authenticates via Resource Principal; its dynamic group membership grants it permission to invoke the rotation Function when the rotation schedule fires.
 
 **Least-privilege scoping.** All policies are compartment-scoped, not tenancy-scoped. The dynamic group matches the specific Function OCID, not a broad rule like "all functions in the tenancy." If the compartment is deleted or the Function is redeployed to a new OCID, the policy stops matching — the narrowing is intentional.
+
+### IAM authorization model
+
+The dashed edges show the IAM grants that authorize the runtime actions shown in [§3](#3-architecture) and [§4](#4-rotation-flow).
+
+```mermaid
+graph TD
+    subgraph iam["OCI IAM"]
+        FDG["Dynamic Group<br/>matches specific Function OCID"]
+        SDG["Dynamic Group<br/>matches specific Vault Secret OCID"]
+        FPOL["Function principal policies<br/>(compartment-scoped)"]
+        SPOL["Vault Secret principal policies<br/>(compartment-scoped)"]
+        FDG --> FPOL
+        SDG --> SPOL
+    end
+
+    subgraph compartment["Compartment: secret-rotation"]
+        FN["OCI Function<br/>rotation-handler"]
+        SEC["Vault Secret"]
+        MT["Object Storage bucket"]
+        NT["ONS Topic"]
+
+        FPOL -. "manage secret-family<br/>(scoped to secret OCID)" .-> SEC
+        FPOL -. "manage objects<br/>(scoped to bucket name)" .-> MT
+        FPOL -. "use ons-topics<br/>(PublishMessage only)" .-> NT
+
+        SPOL -. "read fn-function<br/>(compartment-scoped)" .-> FN
+        SPOL -. "use fn-invocation<br/>(scoped to Function OCID)" .-> FN
+
+        FN -. "resource principal matched by" .-> FDG
+        SEC -. "resource principal matched by" .-> SDG
+    end
+```
 
 **Secret version retention.** Vault retains all secret versions until explicitly pruned, up to a maximum of 30 active versions. This provides a rollback path. Soft-delete on the secret itself adds a further recovery window before permanent deletion.
 
@@ -200,7 +219,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 **Rotation cadence tradeoffs.** More frequent rotation reduces the window of exposure for a compromised credential but increases the operational load on the target system and the risk of a partial-rotation window (the period between the target being updated and Vault confirming the new version). For most use cases, 30–90 day intervals balance risk reduction against operational noise.
 
-**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to CURRENT, the target holds a new credential while Vault CURRENT still reflects the old one. For this Object Storage demonstration target, re-triggering rotation recovers by overwriting the target and promoting a fresh Vault version. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery. The recovery path is documented in the runbook.
+**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to `CURRENT`, the target holds a new credential while Vault `CURRENT` still reflects the old one. For this Object Storage demonstration target, re-triggering rotation recovers by overwriting the target and promoting a fresh Vault version. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery. The recovery path is documented in the runbook.
 
 **Rollback path.** Previous secret versions are retained in Vault. Rolling back means promoting the previous version to `CURRENT` and re-applying the old credential to the target. The runbook documents the exact steps.
 
