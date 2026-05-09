@@ -5,8 +5,8 @@
 # operations are billed per-use at fractions of a cent.
 #
 # Upgrading to "VIRTUAL_PRIVATE" provides a dedicated HSM partition with stronger
-# non-exportability guarantees but costs ~$1,000+/month. The rotation pattern is
-# identical regardless of vault type; see docs/design.md §5 for the tradeoff.
+# non-exportability guarantees but costs significantly more. The rotation
+# pattern is identical regardless of vault type; see docs/design.md §5 for the tradeoff.
 resource "oci_kms_vault" "vault" {
   compartment_id = var.compartment_id
   display_name   = var.vault_display_name
@@ -17,8 +17,14 @@ resource "oci_kms_vault" "vault" {
 #
 # This key encrypts the secret material at rest. Using a customer-managed key
 # (rather than an Oracle-managed key) means the key's lifecycle is under our
-# control: we can disable or delete it to immediately revoke access to all
-# secrets it protects. protection_mode = "SOFTWARE" matches the DEFAULT vault type.
+# control: disabling it immediately blocks decryption; deletion is permanent
+# but subject to OCI's minimum retention window.
+# protection_mode = "SOFTWARE" matches the DEFAULT vault type.
+#
+# Scheduled automatic KMS key rotation is available only for keys in
+# VIRTUAL_PRIVATE vaults, so it is intentionally not configured here. DEFAULT
+# vault keys can be rotated manually by creating a new key version:
+# `oci kms management key-version create` (see docs/runbook.md §6).
 #
 # management_endpoint references the Vault created above, establishing the
 # dependency chain: Vault must exist before the key can be created.

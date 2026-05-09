@@ -8,8 +8,8 @@ output "vault_management_endpoint" {
   value       = oci_kms_vault.vault.management_endpoint
 }
 
-output "key_id" {
-  description = "OCID of the AES-256 customer-managed master key. Passed to the secret resource and used to verify encryption configuration."
+output "master_key_id" {
+  description = "OCID of the AES-256 customer-managed KMS master key."
   value       = oci_kms_key.master_key.id
 }
 

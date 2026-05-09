@@ -16,9 +16,9 @@ output "vault_management_endpoint" {
   value       = module.vault.vault_management_endpoint
 }
 
-output "key_id" {
-  description = "OCID of the AES-256 customer-managed master key."
-  value       = module.vault.key_id
+output "master_key_id" {
+  description = "OCID of the AES-256 customer-managed KMS master key."
+  value       = module.vault.master_key_id
 }
 
 output "dynamic_group_name" {

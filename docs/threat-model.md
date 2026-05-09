@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Threat Model
 
 **Status:** Accepted
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-09
 
 ---
 
@@ -32,7 +32,8 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 
 **Mitigation:**
 - **In transit:** All OCI SDK calls use TLS 1.2+ to HTTPS endpoints. The OCI SDK enforces certificate verification; there is no plaintext path.
-- **At rest in Vault:** Secret material is encrypted with an AES-256 customer-managed KMS key (`protection_mode = "SOFTWARE"`). Disabling or deleting the KMS key revokes access to all secrets it protects — this is the break-glass mechanism for emergency revocation.
+- **At rest in Vault:** Secret material is encrypted with an AES-256 customer-managed KMS key (`protection_mode = "SOFTWARE"`). Disabling the KMS key immediately blocks decryption of all secrets it protects; scheduling key deletion provides a permanent revocation path after OCI's retention window.
+- **KMS key lifecycle:** Automatic KMS key rotation is available only for `VIRTUAL_PRIVATE` vault keys. This deployment uses a `DEFAULT` vault; the master key must be rotated manually when required (see [runbook §6](runbook.md#6-rotate-the-kms-master-key-manually)).
 - **At rest in Object Storage:** The target bucket is `access_type = "NoPublicAccess"`. IAM policy restricts write access to the rotation Function's dynamic group, scoped to the specific bucket name (`where target.bucket.name = '...'`). No public URL exists for the credential object.
 - OCI Vault enforces soft-delete: a secret cannot be silently destroyed. It enters `PENDING_DELETION` state with a configurable retention window (1–30 days) before permanent deletion, providing a recovery path against accidental or malicious deletion.
 

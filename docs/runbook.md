@@ -14,15 +14,23 @@ source scripts/set-env.sh
 
 This calls `terraform output -json` once and uses `jq` to export the values as shell variables. Requires Terraform state to be initialised and a successful `terraform apply`.
 
-To build and push a new Function image, use the helper script — it handles OCIR authentication, repository creation, and the push in one step:
+---
 
-```bash
-bash scripts/push-image.sh
-```
+## Contents
+
+1. [Manually Invoke the Rotation Function](#1-manually-invoke-the-rotation-function)
+2. [Investigate a Failure](#2-investigate-a-failure)
+3. [Rollback to Previous Version](#3-rollback-to-previous-version)
+4. [Secret Version Pruning](#4-secret-version-pruning)
+5. [Update the Function Code](#5-update-the-function-code)
+6. [Rotate the KMS Master Key Manually](#6-rotate-the-kms-master-key-manually)
+7. [Full Destroy](#7-full-destroy)
 
 ---
 
 ## 1. Manually Invoke the Rotation Function
+
+This section covers secret credential rotation. To rotate the KMS master key, see [§6 — Rotate the KMS Master Key Manually](#6-rotate-the-kms-master-key-manually).
 
 Two ways to trigger rotation manually:
 
@@ -271,7 +279,53 @@ A successful rotation returns `{"status": "ok", ...}`. If the response is an err
 
 ---
 
-## 6. Full Destroy
+## 6. Rotate the KMS Master Key Manually
+
+This procedure rotates the customer-managed KMS master key (CMK) used to encrypt Vault secret material at rest. It does not rotate the secret credential value; use the secret rotation procedure for that.
+
+OCI supports automatic KMS key rotation only for keys in `VIRTUAL_PRIVATE` vaults. For this `DEFAULT` vault, create a new key version manually when required.
+
+Creating a new key version does not immediately re-encrypt existing secret versions. Future encryption operations use the new key version, while older key versions remain available to decrypt data encrypted before rotation.
+
+**Step 1 — Create a new key version:**
+
+```bash
+NEW_KEY_VERSION_ID=$(oci kms management key-version create \
+  --key-id "$MASTER_KEY_ID" \
+  --endpoint "$VAULT_MANAGEMENT_ENDPOINT" \
+  --query 'data.id' \
+  --raw-output)
+
+echo "$NEW_KEY_VERSION_ID"
+```
+
+**Step 2 — Verify the new key version exists:**
+
+```bash
+oci kms management key-version get \
+  --key-id "$MASTER_KEY_ID" \
+  --key-version-id "$NEW_KEY_VERSION_ID" \
+  --endpoint "$VAULT_MANAGEMENT_ENDPOINT" \
+  --query 'data.{"version-id":"id","lifecycle-state":"lifecycle-state","time-created":"time-created"}'
+```
+
+The `version-id` field should match `$NEW_KEY_VERSION_ID`. `lifecycle-state` should be `ENABLED`.
+
+**Step 3 — List all key versions (optional):**
+
+```bash
+oci kms management key-version list \
+  --key-id "$MASTER_KEY_ID" \
+  --endpoint "$VAULT_MANAGEMENT_ENDPOINT" \
+  --all \
+  --query 'data[*].{"version-id":"id","time-created":"time-created","time-of-deletion":"time-of-deletion"}'
+```
+
+Old key versions remain available to decrypt data they previously encrypted. Schedule old key versions for deletion only after confirming no remaining ciphertext depends on them.
+
+---
+
+## 7. Full Destroy
 
 Tears down all resources created by Terraform. The teardown script handles the required pre-destroy steps automatically:
 

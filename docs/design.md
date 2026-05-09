@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Design Document
 
 **Status:** Accepted
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-09
 
 ---
 
@@ -129,7 +129,11 @@ The Function authenticates to OCI APIs using Resource Principal — OCI issues t
 
 ### Vault `DEFAULT` protection mode (software keys)
 
-Software-protected keys are used for this reference implementation. HSM-backed (`VIRTUAL_PRIVATE`) keys provide stronger non-exportability guarantees but cost significantly more and require a dedicated HSM partition. HSM-backed keys are noted as future work in [§10 — Future Work](#10-future-work). The rotation *pattern* is identical regardless of key protection mode.
+Software-protected keys in a `DEFAULT` vault are used for this reference implementation. A `VIRTUAL_PRIVATE` vault with HSM-backed keys provides stronger non-exportability guarantees but costs significantly more and requires a dedicated HSM partition. HSM-backed keys are noted as future work in [§10 — Future Work](#10-future-work). The secret rotation *pattern* is identical regardless of vault type or key protection mode.
+
+For `DEFAULT` vault keys, only manual CMK rotation is supported. Automatic scheduled KMS key rotation requires a `VIRTUAL_PRIVATE` vault and is documented as future work in [§10 — Future Work](#10-future-work).
+
+CMK rotation is separate from secret credential rotation: rotating the CMK creates a new KMS key version for at-rest encryption, while rotating the secret changes the credential value used by the target system.
 
 ### Single compartment
 
@@ -161,7 +165,7 @@ The full state diagram — including failure handling and the re-trigger recover
 
 ### IAM authorization model
 
-The dashed edges show the IAM grants that authorize the runtime actions shown in [§3](#3-architecture) and [§4](#4-rotation-flow).
+The dashed edges show the IAM grants that authorize the runtime actions shown in [§3 — Architecture](#3-architecture) and [§4 — Rotation Flow](#4-rotation-flow).
 
 ```mermaid
 graph TD
@@ -230,5 +234,6 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 - **Multi-region replication.** Vault secrets can be replicated to a secondary region using OCI Vault cross-region replication. The rotation Function would need to be deployed in both regions, or a single-region Function would need to update both Vault instances. Not implemented here.
 - **Cross-tenancy access.** Secrets shared across tenancies require cross-tenancy IAM policies. The pattern is documented in the OCI IAM docs but is out of scope for this reference.
 - **HSM-backed keys.** Upgrading from `DEFAULT` to `VIRTUAL_PRIVATE` protection mode requires destroying and recreating the KMS key (and therefore the secret). Plan for this before using this pattern with highly sensitive material.
+- **Automatic KMS key rotation.** OCI supports scheduled automatic rotation for KMS keys only in `VIRTUAL_PRIVATE` vaults. For `DEFAULT` vault keys, manual rotation via `oci kms management key-version create` is available (see [runbook §6](runbook.md#6-rotate-the-kms-master-key-manually)). Upgrading to automatic rotation requires migrating to a `VIRTUAL_PRIVATE` vault and choosing an organization-approved cryptoperiod, typically much longer than the secret credential rotation interval. This is separate from secret rotation: KMS key rotation creates a new key version for at-rest encryption, while secret rotation changes the credential value used by the target system.
 - **Real target integrations.** Replacing the Object Storage target with a real database (e.g., using OCI Database's password rotation API) or a third-party secret (e.g., a GitHub PAT) follows the same pattern — only `target_client.py` changes.
 - **CI/CD for Function updates.** A GitHub Actions workflow that builds, pushes, and redeploys the Function on merge to `main` is a natural extension.
