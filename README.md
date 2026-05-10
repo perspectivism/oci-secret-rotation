@@ -1,8 +1,20 @@
 # OCI Secret Lifecycle Service
 
-A production-grade reference implementation of the canonical OCI secret rotation pattern:
-**OCI Vault native rotation scheduling** + **custom Function as the rotation target**,
-authenticated via Resource Principal (no long-lived credentials stored on OCI runtime resources).
+A production-oriented reference implementation of an OCI-native secret rotation pattern:
+**OCI Vault native rotation scheduling** + **custom Function rotation logic**,
+authenticated via Resource Principal.
+
+This project exists to show how credential rotation can be automated on OCI without
+external schedulers, static runtime credentials, or one-off scripts. It uses OCI Vault
+to drive the rotation schedule, OCI Functions for target-specific rotation logic, and
+Resource Principal authentication so deployed resources do not store long-lived API keys.
+
+The reference target is Object Storage, but the design is intentionally extensible:
+the target-specific implementation is isolated in `target_client.py`, making it the
+primary change point for adapting the pattern to databases, API tokens, service
+credentials, or other systems that need controlled secret lifecycle management.
+The goal is to demonstrate a rotation workflow that is automated, auditable, and
+adaptable.
 
 ---
 

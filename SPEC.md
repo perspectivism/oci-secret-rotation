@@ -8,6 +8,20 @@
 
 ---
 
+## Contents
+
+1. [Project Goals](#1-project-goals)
+2. [Architecture](#2-architecture)
+3. [Tech Stack](#3-tech-stack)
+4. [Repository Structure](#4-repository-structure)
+5. [Coding Conventions](#5-coding-conventions)
+6. [Credentials and Secrets Handling](#6-credentials-and-secrets-handling)
+7. [Milestones](#7-milestones)
+8. [Written Artifact Specifications](#8-written-artifact-specifications)
+9. [Final Review Checklist](#9-final-review-checklist)
+
+---
+
 ## 1. Project Goals
 
 In priority order:

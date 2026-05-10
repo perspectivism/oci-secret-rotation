@@ -5,6 +5,25 @@
 
 ---
 
+## Contents
+
+- [Overview](#overview)
+- [STRIDE Analysis](#stride-analysis)
+  - [Spoofing — Unauthorized Rotation Trigger](#spoofing--unauthorized-rotation-trigger)
+  - [Tampering — Secret Material Modification](#tampering--secret-material-modification)
+  - [Repudiation — Disputing That Rotation Occurred](#repudiation--disputing-that-rotation-occurred)
+  - [Information Disclosure — Credential Leakage](#information-disclosure--credential-leakage)
+  - [Denial of Service — Rotation Prevented or Disrupted](#denial-of-service--rotation-prevented-or-disrupted)
+  - [Elevation of Privilege — Function Accesses Out-of-Scope Resources](#elevation-of-privilege--function-accesses-out-of-scope-resources)
+- [Rotation-Specific Failure Modes](#rotation-specific-failure-modes)
+  - [Target updated, Vault promote fails](#target-updated-vault-promote-fails)
+  - [Vault `PENDING` written, target update fails](#vault-pending-written-target-update-fails)
+  - [Duplicate concurrent rotation invocations](#duplicate-concurrent-rotation-invocations)
+  - [Replay of old rotation triggers](#replay-of-old-rotation-triggers)
+- [Operator Workstation Credentials](#operator-workstation-credentials)
+
+---
+
 ## Overview
 
 This document applies STRIDE threat analysis to the OCI secret rotation system. The system has two trust boundaries: between the Vault (where the secret lives) and the rotation Function (which reads and writes it), and between the Function and the rotation target (the Object Storage bucket that holds the current credential value).

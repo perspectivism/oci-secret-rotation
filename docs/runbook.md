@@ -1,6 +1,7 @@
 # OCI Secret Rotation — Runbook
 
-Operational procedures for the secret rotation system. All CLI commands use environment variables populated by the setup script.
+Operational procedures for the secret rotation system. Commands assume environment
+variables have been populated by `scripts/set-env.sh`.
 
 ---
 
@@ -18,7 +19,7 @@ This calls `terraform output -json` once and uses `jq` to export the values as s
 
 ## Contents
 
-1. [Manually Invoke the Rotation Function](#1-manually-invoke-the-rotation-function)
+1. [Rotate the Secret Manually](#1-rotate-the-secret-manually)
 2. [Investigate a Failure](#2-investigate-a-failure)
 3. [Rollback to Previous Version](#3-rollback-to-previous-version)
 4. [Secret Version Pruning](#4-secret-version-pruning)
@@ -28,7 +29,7 @@ This calls `terraform output -json` once and uses `jq` to export the values as s
 
 ---
 
-## 1. Manually Invoke the Rotation Function
+## 1. Rotate the Secret Manually
 
 This section covers secret credential rotation. To rotate the KMS master key, see [§6 — Rotate the KMS Master Key Manually](#6-rotate-the-kms-master-key-manually).
 
@@ -281,7 +282,7 @@ A successful rotation returns `{"status": "ok", ...}`. If the response is an err
 
 ## 6. Rotate the KMS Master Key Manually
 
-This procedure rotates the customer-managed KMS master key (CMK) used to encrypt Vault secret material at rest. It does not rotate the secret credential value; use the secret rotation procedure for that.
+This procedure rotates the customer-managed KMS master key (CMK) used to encrypt Vault secret material at rest. It does not rotate the secret credential value; use [§1 — Rotate the Secret Manually](#1-rotate-the-secret-manually) for that.
 
 OCI supports automatic KMS key rotation only for keys in `VIRTUAL_PRIVATE` vaults. For this `DEFAULT` vault, create a new key version manually when required.
 

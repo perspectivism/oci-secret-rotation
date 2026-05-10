@@ -5,6 +5,21 @@
 
 ---
 
+## Contents
+
+1. [Problem Statement](#1-problem-statement)
+2. [Goals and Non-Goals](#2-goals-and-non-goals)
+3. [Architecture](#3-architecture)
+4. [Rotation Flow](#4-rotation-flow)
+5. [Design Decisions](#5-design-decisions)
+6. [Rotation State Machine](#6-rotation-state-machine)
+7. [Security Model](#7-security-model)
+8. [Observability Model](#8-observability-model)
+9. [Operational Considerations](#9-operational-considerations)
+10. [Future Work](#10-future-work)
+
+---
+
 ## 1. Problem Statement
 
 Secrets — database passwords, API keys, signing tokens — become riskier the longer they remain unchanged. Over time they may be copied into scripts, cached by clients, logged by mistake, shared during incidents, or retained in systems no one actively maintains. If one of those credentials is compromised, responders must treat its entire lifetime as the possible exposure window. Regular rotation limits that window and reduces the amount of history that must be investigated.
