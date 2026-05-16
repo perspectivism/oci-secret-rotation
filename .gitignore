@@ -1,17 +1,16 @@
 # Credentials — never commit these
 *.pem
 *.key
+# Guards against accidentally copying .oci/ into the repo tree; ~/.oci/ is outside the repo and unaffected.
 .oci/
 .env
 .env.local
 
 # Terraform
 .terraform/
-*.tfstate
-*.tfstate.*
+*.tfstate*
 *.tfvars
 backend.hcl
-.terraform.lock.hcl
 
 # Python
 __pycache__/

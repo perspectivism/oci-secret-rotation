@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 locals {
   image_url = "${var.region}.ocir.io/${var.tenancy_namespace}/${var.ocir_repo}:${var.image_tag}"
 }

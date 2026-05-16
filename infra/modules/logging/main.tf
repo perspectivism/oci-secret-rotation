@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 # Log group that contains all rotation-related logs.
 #
 # A dedicated log group keeps rotation logs isolated from other application

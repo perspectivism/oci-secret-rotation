@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 # Creates a dynamic group whose sole member is the rotation Function.
 #
 # Dynamic groups are tenancy-level resources — compartment_id must be the tenancy

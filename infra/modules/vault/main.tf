@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 # Creates a DEFAULT (software-protected) OCI Vault.
 #
 # vault_type = "DEFAULT" uses OCI-managed HSM infrastructure with software key

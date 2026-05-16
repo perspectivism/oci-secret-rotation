@@ -67,7 +67,7 @@ AI assistants working in this repo should read `SPEC.md` alongside this file bef
 - Small, focused commits per milestone
 - Commit messages follow: `<milestone>: <what changed and why>`
   - Example: `M1: add vault module with purpose comments on each resource`
-- Never commit: `*.pem`, `*.key`, `terraform.tfstate*`, `*.tfvars`, `.env`, `.terraform/`
+- Never commit: `*.pem`, `*.key`, `*.tfstate*`, `*.tfvars`, `backend.hcl`, `.env`, `.env.local`, `.oci/`, `.terraform/`
 - Verify `.gitignore` is in effect before every commit
 - One logical change per commit — do not mix unrelated changes
 

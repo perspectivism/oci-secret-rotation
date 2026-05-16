@@ -5,17 +5,17 @@
 #   bash scripts/destroy.sh
 #
 # Prerequisites: OCI CLI configured (~/.oci/config), terraform init completed,
-# and scripts/set-env.sh sourced (or SECRET_OCID / FUNCTION_ID / NAMESPACE /
-# BUCKET_NAME already set in the environment).
+# and scripts/set-env.sh sourced (or SECRET_OCID / FUNCTION_ID / VAULT_ID /
+# COMPARTMENT_OCID / NAMESPACE / BUCKET_NAME already set in the environment).
 #
 # Steps performed:
-#   1. Disable auto-rotation, schedule the secret for deletion (2-day window), and
-#      drop it from Terraform state — prevents terraform destroy from hanging or
-#      erroring on the PENDING_DELETION conflict
-#   2. Delete the OCIR container repository — not managed by Terraform, so must
+#   1. Prepare and schedule secret deletion (disable auto-rotation, schedule 2-day
+#      deletion, remove from Terraform state)
+#   2. Schedule vault deletion (8-day window, cascade to keys, remove from state)
+#   3. Delete the OCIR container repository — not managed by Terraform, so must
 #      be cleaned up explicitly
-#   3. Empty the target Object Storage bucket (terraform cannot delete a non-empty bucket)
-#   4. terraform destroy
+#   4. Empty the target Object Storage bucket (Terraform cannot delete a non-empty bucket)
+#   5. terraform destroy
 
 set -euo pipefail
 
@@ -29,7 +29,7 @@ if [[ -z "${SECRET_OCID:-}" ]]; then
 fi
 
 echo ""
-echo "=== Step 1: Prepare secret for deletion ==="
+echo "=== Step 1: Prepare and schedule secret deletion ==="
 # Auto-rotation must be disabled before OCI will allow the secret to be scheduled
 # for deletion. Skip if FUNCTION_ID is empty — rotation_config was never applied
 # (first-apply-only deployment), so there is nothing to disable.
@@ -63,7 +63,25 @@ terraform state rm module.vault.oci_vault_secret.secret
 echo "Secret removed from Terraform state."
 
 echo ""
-echo "=== Step 2: Delete OCIR container repository ==="
+echo "=== Step 2: Schedule vault deletion ==="
+# Schedule vault deletion at 8 days — one day above OCI's 7-day minimum to
+# avoid boundary check errors. Scheduling the vault also cascades to all keys
+# within it, so no separate key scheduling command is needed.
+echo "Scheduling vault for deletion (8-day window)..."
+oci kms management vault schedule-deletion \
+  --vault-id "$VAULT_ID" \
+  --time-of-deletion "$(date -u -d '+8 days' +%Y-%m-%dT%H:%M:%S.000Z)"
+echo "Vault scheduled for deletion — permanently removed in ~8 days."
+
+# Remove vault and key from Terraform state so terraform destroy does not
+# try to delete them again and conflict with their PENDING_DELETION state.
+cd "$INFRA_DIR"
+terraform state rm module.vault.oci_kms_key.master_key
+terraform state rm module.vault.oci_kms_vault.vault
+echo "Vault and key removed from Terraform state."
+
+echo ""
+echo "=== Step 3: Delete OCIR container repository ==="
 OCIR_REPO=$(grep "^ocir_repo" "$INFRA_DIR/terraform.tfvars" | head -1 | cut -d'"' -f2)
 REPO_ID=$(oci artifacts container repository list \
   --compartment-id "$COMPARTMENT_OCID" \
@@ -80,7 +98,7 @@ else
 fi
 
 echo ""
-echo "=== Step 3: Empty target bucket ==="
+echo "=== Step 4: Empty target bucket ==="
 echo "Deleting all objects from bucket: $BUCKET_NAME"
 oci os object bulk-delete \
   --namespace "$NAMESPACE" \
@@ -89,7 +107,7 @@ oci os object bulk-delete \
 echo "Bucket emptied."
 
 echo ""
-echo "=== Step 4: terraform destroy ==="
+echo "=== Step 5: terraform destroy ==="
 cd "$INFRA_DIR"
 terraform destroy
 
@@ -101,7 +119,6 @@ echo "  • The Vault secret is in PENDING_DELETION state — it was scheduled f
 echo "    deletion above with a 2-day window. It will be permanently removed"
 echo "    in ~48 hours. No further action needed."
 echo ""
-echo "  • The KMS Vault and master key are in PENDING_DELETION state — OCI"
-echo "    enforces a minimum 7-day retention period for vaults and keys."
-echo "    They will be permanently removed after that window expires."
-echo "    To adjust the window: OCI Console → Security → Vault → Keys"
+echo "  • The KMS Vault and its keys are in PENDING_DELETION state — they"
+echo "    were scheduled above with an 8-day window and will be permanently"
+echo "    removed ~8 days after this script ran."

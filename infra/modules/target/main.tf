@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 # Private Object Storage bucket that acts as the rotation target.
 #
 # In a real deployment the target would be a database, API gateway, or

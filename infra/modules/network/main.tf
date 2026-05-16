@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    oci = {
+      source = "oracle/oci"
+    }
+  }
+}
+
 # Looks up the "All <region> Services In Oracle Services Network" service CIDR label.
 # This covers supported regional OCI service API endpoints reachable through a
 # Service Gateway, including Vault, Secret Management/Retrieval, Object Storage,

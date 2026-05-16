@@ -336,8 +336,8 @@ bash scripts/destroy.sh
 
 The script performs four pre-destroy cleanup steps, then runs `terraform destroy`:
 
-1. Disables auto-rotation on the secret (OCI blocks deletion while rotation is enabled)
-2. Schedules the secret for deletion with a 2-day retention window and removes it from Terraform state — the OCI provider would otherwise hang waiting for `DELETED` state (which won't arrive for ~48 hours) or error with a `409-IncorrectState` conflict. The secret is permanently removed ~48 hours later.
+1. Prepares and schedules secret deletion — disables auto-rotation (OCI blocks deletion while rotation is enabled), schedules the secret for deletion with a 2-day window, and removes it from Terraform state. The OCI provider would otherwise hang waiting for `DELETED` state or error with a `409-IncorrectState` conflict. The secret is permanently removed ~48 hours later.
+2. Schedules vault deletion — schedules the vault for deletion with an 8-day window (one day above OCI's 7-day minimum to avoid boundary errors). Vault deletion cascades to all keys within it. Removes the vault and Terraform-managed key from Terraform state to prevent conflict with `PENDING_DELETION` state during `terraform destroy`.
 3. Deletes the OCIR container repository (not managed by Terraform, so it must be cleaned up explicitly)
 4. Empties the target Object Storage bucket (Terraform cannot delete a non-empty bucket)
 
@@ -350,5 +350,8 @@ The `terraform destroy` step typically takes 5–10 minutes end to end. Two reso
 
 **After destroy — note:**
 
-- The KMS Vault and master key are placed in `PENDING_DELETION` by `terraform destroy`. OCI enforces a minimum 7-day retention period for vaults and keys — they are permanently removed after that window expires. To adjust the window, use the OCI Console under **Security → Vault → Keys**.
+- The KMS Vault and its keys are placed in `PENDING_DELETION` by the destroy script with an 8-day window. They are permanently removed ~8 days after `destroy.sh` runs.
 
+**Future work:**
+
+- Make `destroy.sh` safely resumable after partial failure by checking OCI lifecycle state and Terraform state membership before each cleanup action. Reruns should skip work already completed instead of extending deletion windows or failing on already-removed resources.

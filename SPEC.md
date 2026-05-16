@@ -147,7 +147,7 @@ oci-secret-rotation/
 │   ├── set-env.sh                    # Populates shell env vars from terraform output
 │   ├── push-image.sh                 # Builds and pushes the Function image to OCIR
 │   └── destroy.sh                    # Clean teardown
-└── .gitignore                        # MUST exclude *.pem, terraform.tfstate*, .terraform/, *.tfvars
+└── .gitignore                        # credentials, Terraform state, and local config — see §6
 ```
 
 ---
@@ -190,7 +190,7 @@ oci-secret-rotation/
 
 - Small, focused commits per milestone
 - Commit messages follow: `<milestone>: <what changed and why>`
-- Never commit: `*.pem`, `*.key`, `terraform.tfstate*`, `*.tfvars`, `.env`, `.terraform/`
+- Never commit: `*.pem`, `*.key`, `*.tfstate*`, `*.tfvars`, `backend.hcl`, `.env`, `.env.local`, `.oci/`, `.terraform/`
 - `.gitignore` is created in M0 and verified before every commit
 
 ---
@@ -277,17 +277,16 @@ when the push succeeds.
 # Credentials
 *.pem
 *.key
+# Guards against accidentally copying .oci/ into the repo tree; ~/.oci/ is outside the repo and unaffected.
 .oci/
 .env
 .env.local
 
 # Terraform
 .terraform/
-*.tfstate
-*.tfstate.*
+*.tfstate*
 *.tfvars
-!*.tfvars.example
-.terraform.lock.hcl
+backend.hcl
 
 # Python
 __pycache__/
@@ -299,6 +298,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# AI tools
+.codex
 ```
 
 ---
