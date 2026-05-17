@@ -122,19 +122,21 @@ oci fn function invoke \
   --file "-"
 ```
 
-A successful response confirms the Function can authenticate to Vault and returns the current version number:
+A successful response confirms the Function can authenticate to Vault and returns the current version number (e.g. `3` — the actual number will vary):
 
 ```json
-{"responseCode": 200, "versionNo": N, "returnMessage": "VERIFY_CONNECTION succeeded"}
+{"responseCode": 200, "versionNo": 3, "returnMessage": "VERIFY_CONNECTION succeeded"}
 ```
 
-A failure indicates an IAM or connectivity issue:
+A failure indicates Vault access could not be verified — for example, the Function lacks permission to read the secret, or the supplied secret OCID does not identify an accessible secret:
 
 ```json
 {"responseCode": 400, "versionNo": null, "returnMessage": "VERIFY_CONNECTION failed: <error>"}
 ```
 
-All four rotation steps accept the same basic invocation format, but only `VERIFY_CONNECTION` is read-only. Directly invoking the other steps mutates rotation state and should be reserved for targeted troubleshooting. `PROMOTE_PENDING_VERSION` additionally requires `"versionNo": N` in the payload.
+A common OCI error here is `NotAuthorizedOrNotFound`, which can mean either insufficient permission or that the referenced secret was not found or is not accessible.
+
+All four rotation steps accept the same basic invocation format, but only `VERIFY_CONNECTION` is read-only. Directly invoking the other steps mutates rotation state and should be reserved for targeted troubleshooting. `PROMOTE_PENDING_VERSION` additionally requires a numeric `versionNo` field in the payload.
 
 ### Common failure states
 
@@ -144,7 +146,7 @@ All four rotation steps accept the same basic invocation format, but only `VERIF
 | `missing secretId in request body` | Body is valid JSON but `secretId` key absent or blank | Nothing changed | Check the invocation payload |
 | `invalid request body` | Body is not valid JSON or not valid UTF-8 | Nothing changed | Fix the invocation payload |
 | `step field required` | `step` key absent or blank — bare `{"secretId":"..."}` payload used instead of full `SecretRotationInput` | Nothing changed | Use `oci vault secret rotate` for normal rotation; add `"step"` field for direct invocation |
-| `VERIFY_CONNECTION failed: ...` | Function cannot read the secret — IAM policy missing or propagating | Nothing changed | Wait 60s for IAM propagation, retry |
+| `VERIFY_CONNECTION failed: ...` | Function cannot read the secret — IAM policy missing or propagating, or the secret OCID is not found or not accessible | Nothing changed | Check the secret OCID and IAM policy; if IAM was just changed, wait 60s and retry |
 | `CREATE_PENDING_VERSION failed: ...` | Vault API error creating or reading `PENDING` version | `PENDING` version may or may not exist | Retry — idempotent if `PENDING` was already created |
 | `UPDATE_TARGET_SYSTEM failed: ...` | IAM policy missing for bucket write, bucket deleted, or network issue | `PENDING` version exists in Vault; target NOT updated | Restore IAM policy or bucket, retry |
 | `PROMOTE_PENDING_VERSION failed: ...` | Vault promote API error or version in unexpected stage | `PENDING` exists in Vault; target IS updated | Inspect version stages, retry |

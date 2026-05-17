@@ -1,20 +1,10 @@
 # OCI Secret Lifecycle Service
 
-A production-oriented reference implementation of an OCI-native secret rotation pattern:
-**OCI Vault native rotation scheduling** + **custom Function rotation logic**,
-authenticated via Resource Principal.
+A production-oriented reference implementation of an OCI-native secret rotation architecture built on **native OCI Vault rotation scheduling**, **custom OCI Function rotation logic**, and **Resource Principal authentication**.
 
-This project exists to show how credential rotation can be automated on OCI without
-external schedulers, static runtime credentials, or one-off scripts. It uses OCI Vault
-to drive the rotation schedule, OCI Functions for target-specific rotation logic, and
-Resource Principal authentication so deployed resources do not store long-lived API keys.
+This project demonstrates how credential rotation can be automated on OCI without external schedulers, static runtime credentials, or one-off scripts. OCI Vault drives the rotation schedule, OCI Functions handle target-specific rotation logic, and Resource Principal authentication allows deployed resources to operate without long-lived API keys.
 
-The reference target is Object Storage, but the design is intentionally extensible:
-the target-specific implementation is isolated primarily in `target_client.py`, making it the
-primary change point for adapting the pattern to databases, API tokens, service
-credentials, or other systems that need controlled secret lifecycle management.
-The goal is to demonstrate a rotation workflow that is automated, auditable, and
-adaptable.
+The reference target is Object Storage, but the design is intentionally extensible. Target-specific logic is isolated primarily in `target_client.py`, making it the main change point for adapting the pattern to databases, API tokens, service credentials, or other systems that require controlled secret lifecycle management.
 
 ---
 
@@ -41,6 +31,8 @@ graph TD
 ```
 
 > **Note:** This diagram is a simplified view. See [docs/design.md](docs/design.md) for the detailed architecture including compartment boundaries and IAM principals.
+
+A full credential rotation follows a four-step protocol orchestrated by Vault — `VERIFY_CONNECTION` → `CREATE_PENDING_VERSION` → `UPDATE_TARGET_SYSTEM` → `PROMOTE_PENDING_VERSION` — with the Function invoked once per step.
 
 ---
 
