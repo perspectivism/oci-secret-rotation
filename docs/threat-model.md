@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Threat Model
 
 **Status:** Accepted
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-16
 
 ---
 
@@ -63,8 +63,8 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** An operator or auditor disputes whether a specific rotation occurred, what credential was written, or which principal triggered the rotation.
 
 **Mitigation:**
-- **OCI Audit** captures API calls such as Vault reads, Vault writes, Function invocations, and ONS publishes, including caller identity (such as the Function OCID for Resource Principal calls), timestamp, request ID, and source IP. OCI Audit cannot be disabled at the tenancy level; it is managed by OCI and is available for forensic reconstruction. Note: object-level `put_object` operations are not captured by OCI Audit; capture them with Object Storage service logs if needed. The rotation Function's structured log entry at the `target_update` phase provides the application-level evidence of the write.
-- The rotation Function emits structured JSON log entries to OCI Logging at each phase (`start`, `read`, `vault_pending`, `target_update`, `vault_promote`, `complete`). Each entry includes the secret OCID, phase name, and version number where relevant.
+- **OCI Audit** captures API calls such as Vault reads, Vault writes, Function invocations, and ONS publishes, including caller identity (such as the Function OCID for Resource Principal calls), timestamp, request ID, and source IP. OCI Audit cannot be disabled at the tenancy level; it is managed by OCI and is available for forensic reconstruction. Note: object-level `put_object` operations are not captured by OCI Audit; capture them with Object Storage service logs if needed. The rotation Function's structured log entry at the `UPDATE_TARGET_SYSTEM` step provides the application-level evidence of the write.
+- The rotation Function emits a structured JSON log entry to OCI Logging for each rotation step. Because OCI invokes the Function once per step, each invocation's log entry records the outcome of that step independently. Each entry includes the secret OCID, step name, and version number where relevant.
 - After each successful rotation the Function publishes a message to the ONS topic. The message includes the secret OCID and status, and is delivered to subscribed email endpoints. This provides an out-of-band confirmation trail independent of OCI Logging.
 - Vault retains secret versions until explicitly pruned, subject to OCI Vault version limits. Any retained previous version can be retrieved by version number (`oci secrets secret-bundle get --version-number <N>`), enabling forensic reconstruction of the credential sequence.
 
@@ -75,11 +75,11 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** The current credential value is exposed via log output, error messages, API responses, or misconfigured access controls on the target bucket.
 
 **Mitigation:**
-- The rotation Function **does not log the credential value at any phase**. `rotation.py` logs phase names, secret OCIDs, and version numbers — never the plaintext credential. The new credential is generated in memory, passed directly to `target_client.update_credential()`, and never written to any logging context.
+- The rotation Function **does not log the credential value at any step**. `rotation.py` logs step names, secret OCIDs, and version numbers — never the plaintext credential. The new credential is generated in memory, passed directly to `target_client.update_credential()`, and never written to any logging context.
 - OCI Vault returns secret content as a base64-encoded payload. The Function decodes it in memory and passes it directly to the credential update call; it is never included in log fields, error messages, or structured logging context.
 - The Object Storage bucket is `NoPublicAccess`. Access requires a signed OCI API request from a principal with IAM permission. No pre-authenticated request URLs are created.
 - `terraform.tfvars` (which contains tenancy OCIDs) is `.gitignore`d and is never committed. Secret content is never written to any file tracked by the repository.
-- Function application config contains the target bucket name, namespace, and secret OCID — resource identifiers, not credential material. Even if this config were read by an unauthorized principal, no credential value is exposed.
+- Function application config contains the target bucket name, namespace, target object name, and ONS topic OCID — resource identifiers, not credential material. Even if this config were read by an unauthorized principal, no credential value is exposed. The secret OCID arrives in the invocation payload at runtime and is not stored in Function config.
 
 ---
 
@@ -88,11 +88,11 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 **Threat:** The rotation Function is unavailable, rate-limited, or its invocation is blocked, preventing scheduled rotation from completing.
 
 **Mitigation:**
-- OCI Functions and OCI Vault are managed services with OCI SLAs. Transient failures should be investigated through logs; retry behavior of the Vault scheduler has not been validated empirically and should not be assumed.
+- OCI Functions and OCI Vault are managed services with OCI SLAs. Transient failures should be investigated through logs; OCI retries individual failed steps independently — a step failure does not restart the full rotation cycle.
 - A failed rotation does **not** invalidate the current credential. The `CURRENT` version in Vault remains valid and usable until a successful rotation completes. The system degrades gracefully — credentials continue to work, just without renewal.
 - The 30-day default rotation interval provides a large window before a missed rotation becomes operationally significant. Manual rotation (`oci vault secret rotate`) can be used as an out-of-band fallback when IAM and rotation configuration are healthy.
 - The Function has a 120-second timeout (`timeout_in_seconds = 120`). An unreachable or unresponsive target causes a clean timeout and a logged failure rather than a hung invocation.
-- The Function emits structured log entries for failed rotation phases, which are captured in OCI Logging when function logging is enabled. The runbook provides exact CLI queries to investigate missed rotations.
+- The Function emits structured log entries for failed rotation steps, which are captured in OCI Logging when function logging is enabled. The runbook provides exact CLI queries to investigate missed rotations.
 
 ---
 
@@ -111,25 +111,25 @@ Each identified threat is accompanied by the specific OCI primitive that mitigat
 
 ## Rotation-Specific Failure Modes
 
-Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/0003-rotation-state-machine.md).
+Step names below refer to the four-step rotation protocol defined in [ADR 0003](adr/0003-rotation-state-machine.md).
 
 ### Target updated, Vault promote fails
 
-**Scenario:** Phase 3 (`create_pending_version`) and Phase 4 (`update_credential`) both succeed — a `PENDING` version exists in Vault and Object Storage holds the new credential — but Phase 5 (`promote_to_current()`) fails.
+**Scenario:** The `CREATE_PENDING_VERSION` and `UPDATE_TARGET_SYSTEM` steps both succeed — a `PENDING` version exists in Vault and Object Storage holds the new credential — but the `PROMOTE_PENDING_VERSION` step fails.
 
 **State:** Object Storage and Vault `CURRENT` are inconsistent. See [ADR 0003](adr/0003-rotation-state-machine.md) for the full ordering rationale.
 
-**Recovery:** Re-triggering rotation generates a fresh credential, overwrites the target (last-write-wins), writes a new `PENDING` version to Vault, and promotes it. Both sides converge on the new credential.
+**Recovery:** OCI retries the `PROMOTE_PENDING_VERSION` step. The three-way convergence check finds the version in `PENDING` stage and promotes it. No new credential is generated; both sides converge on the same credential.
 
 ---
 
 ### Vault `PENDING` written, target update fails
 
-**Scenario:** `create_pending_version()` (Phase 3) succeeds — a `PENDING` version exists in Vault — but `update_credential()` (Phase 4) raises `TargetUpdateError`.
+**Scenario:** The `CREATE_PENDING_VERSION` step succeeds — a `PENDING` version exists in Vault — but the `UPDATE_TARGET_SYSTEM` step fails.
 
-**State:** Vault has an orphaned `PENDING` version. `CURRENT` still holds the old credential. Target is consistent with `CURRENT`.
+**State:** Vault has a `PENDING` version. `CURRENT` still holds the old credential. Target is consistent with `CURRENT`.
 
-**Recovery:** Re-triggering rotation calls `update_secret()` again; OCI automatically demotes the orphaned `PENDING` to `DEPRECATED` when the new `PENDING` is created (empirically verified). Rotation proceeds from a consistent state. See [ADR 0003](adr/0003-rotation-state-machine.md).
+**Recovery:** OCI retries the `UPDATE_TARGET_SYSTEM` step directly. The step reads the existing `PENDING` version from Vault and retries the target write with the same credential. No new `PENDING` version is created and no version is demoted. See [ADR 0003](adr/0003-rotation-state-machine.md).
 
 ---
 
@@ -137,7 +137,7 @@ Phase numbers below refer to the rotation sequence defined in [ADR 0003](adr/000
 
 **Scenario:** A manual rotation trigger is sent while a scheduled rotation is already in flight, or two manual triggers are sent close together.
 
-**State:** Two Function invocations execute concurrently, each generating a different credential and racing to write to Vault and Object Storage.
+**State:** Two rotation cycles overlap. If their `CREATE_PENDING_VERSION` steps race, each may generate a different credential before either observes the other's `PENDING` version — resulting in two different credentials racing to write to Vault and Object Storage.
 
 **Mitigation / residual risk:** The implementation has no lock or compare-and-swap around the target write and Vault promotion. Under concurrent invocations, the `PENDING` version created by one invocation may be demoted to `DEPRECATED` when another invocation creates its own `PENDING` version. There is no guarantee that the invocation that writes last to the target is the same invocation that promotes its Vault version to `CURRENT`. In an adverse interleaving, Vault `CURRENT` and the rotation target could hold different credentials.
 
@@ -151,7 +151,7 @@ For this Object Storage demonstration target, manually re-triggering rotation on
 
 **Scenario:** A captured or stale invocation request is replayed to cause an unsolicited rotation.
 
-**Mitigation:** OCI Function invocations use OCI request signing (SigV4-equivalent). The signature includes a `Date` header that OCI validates server-side — requests older than 5 minutes are rejected. Replay beyond that window is not possible at the OCI API layer. Additionally, the IAM policy restricts `fn-invocation` to the specific Vault Secret dynamic group scoped to the rotation Function OCID, making it structurally difficult for an external attacker to forge a valid invocation request.
+**Mitigation:** OCI Function invocations use OCI request signing (SigV4-equivalent). The signature includes a signed `date`/`x-date` header used for replay protection; OCI rejects requests when clock skew exceeds five minutes. Replay beyond that window is not possible at the OCI API layer. Additionally, the IAM policy restricts `fn-invocation` to the specific Vault Secret dynamic group scoped to the rotation Function OCID, making it structurally difficult for an external attacker to forge a valid invocation request.
 
 ---
 

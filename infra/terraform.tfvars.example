@@ -33,15 +33,6 @@ ocir_repo = "secret-rotation/rotation-handler"
 # Image tag to deploy. Change when promoting a specific build.
 image_tag = "latest"
 
-# OCID of the deployed rotation Function.
-# Leave empty on the first apply — the function does not exist yet and the vault
-# secret's rotation_config will be omitted. After the first apply completes, run:
-#   terraform output -raw function_id
-# then paste the result here and run terraform apply again. The second apply adds
-# rotation_config to the existing secret with no replacement.
-# The OCID is stable — it only changes if the function is destroyed and recreated.
-function_ocid = ""
-
 # Email address or HTTPS URL for rotation event notifications via ONS.
 # After terraform apply, OCI will send a subscription confirmation email —
 # you must click the link before notifications are delivered.

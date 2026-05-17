@@ -70,19 +70,14 @@ resource "oci_vault_secret" "secret" {
     content = base64encode("initial-placeholder-replaced-on-first-rotation")
   }
 
-  # rotation_config is omitted on the first apply (function_ocid is empty) to break
-  # the vault↔function cycle. The second apply adds it once the real OCID is known.
-  dynamic "rotation_config" {
-    for_each = var.function_ocid != "" ? [1] : []
-    content {
-      is_scheduled_rotation_enabled = true
-      # ISO 8601 duration — "P30D" means 30 days. Min 1 day, max 360 days.
-      rotation_interval = "P${var.rotation_interval_days}D"
+  rotation_config {
+    is_scheduled_rotation_enabled = true
+    # ISO 8601 duration — "P30D" means 30 days. Min 1 day, max 360 days.
+    rotation_interval = "P${var.rotation_interval_days}D"
 
-      target_system_details {
-        target_system_type = "FUNCTION"
-        function_id        = var.function_ocid
-      }
+    target_system_details {
+      target_system_type = "FUNCTION"
+      function_id        = var.function_ocid
     }
   }
 }

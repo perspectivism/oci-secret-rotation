@@ -9,9 +9,9 @@ terraform {
 # Private Object Storage bucket that acts as the rotation target.
 #
 # In a real deployment the target would be a database, API gateway, or
-# application config store. Object Storage is used here as a demo stand-in:
+# application config store. Object Storage is used here as a reference target:
 # it receives the new credential on every rotation and the change is
-# immediately observable via the console or CLI. See docs/design.md §Demo
+# immediately observable via the console or CLI. See docs/design.md §5
 # for the production target discussion.
 #
 # access_type = "NoPublicAccess" blocks all unauthenticated requests.

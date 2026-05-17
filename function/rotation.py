@@ -1,30 +1,35 @@
-"""Core rotation state machine.
+"""OCI Vault native rotation — four-step protocol handlers.
 
-rotate() orchestrates five phases:
-  1. Read the current secret from Vault (CURRENT version)
-  2. Generate a new credential
-  3. Create a PENDING version in Vault with the new credential
-  4. Update the target system with the new credential
-  5. Promote the PENDING version to CURRENT
+Each function corresponds to one step in OCI's rotation_config protocol:
 
-Failure handling:
-  ServiceError (phase 3, create_pending) — target untouched; Vault unchanged;
-    both sides hold the old credential; safe to retry.
-  TargetUpdateError (phase 4) — PENDING version exists in Vault but CURRENT
-    still holds the old credential; target unchanged. Re-triggering rotation
-    creates a new PENDING (OCI demotes the orphaned PENDING to DEPRECATED)
-    and retries from a clean state.
-  ServiceError (phase 5, promote) — target holds the new credential but Vault
-    is stuck at PENDING; CURRENT still reflects the old credential. Re-triggering
-    rotation recovers: the target accepts the overwrite and the promote is retried.
+  VERIFY_CONNECTION      → verify_connection()
+  CREATE_PENDING_VERSION → create_pending_version()
+  UPDATE_TARGET_SYSTEM   → update_target_system()
+  PROMOTE_PENDING_VERSION → promote_pending_version()
+
+func.py calls these after parsing the SecretRotationInput payload and maps
+the return value to a SecretRotationOutput response. Step functions raise on
+failure and return an int (versionNo) on success — no FDK or HTTP concerns.
+
+Failure handling and retry behaviour:
+  verify_connection(): read-only; safe to retry at any time.
+  create_pending_version(): idempotent — if a PENDING version already exists
+    it is reused without generating a new credential. OCI may call this step
+    more than once; retries converge on the same version.
+  update_target_system(): reads the PENDING credential from Vault at call
+    time. ObjectStorageTargetClient overwrites unconditionally, so retries
+    are safe for this reference target. Real targets should add target-specific
+    retry/idempotency checks appropriate to their credential API.
+  promote_pending_version(): three-way stage check before promoting:
+    CURRENT → already done, success (retry convergence)
+    PENDING → promote via vault.promote_to_current()
+    other   → RuntimeError (unexpected state, fail loudly)
 """
 
 import logging
 import secrets
 
-from oci.exceptions import ServiceError
-
-from target_client import TargetClient, TargetUpdateError
+from target_client import TargetClient
 from vault_client import VaultClient
 
 logger = logging.getLogger(__name__)
@@ -34,107 +39,158 @@ logger = logging.getLogger(__name__)
 _CREDENTIAL_BYTE_LENGTH = 32
 
 
-def rotate(
-    secret_id: str,
-    vault_client: VaultClient,
-    target_client: TargetClient,
-) -> str:
-    """Execute one rotation cycle for a secret.
+def verify_connection(secret_id: str, vault: VaultClient) -> int:
+    """VERIFY_CONNECTION: confirm Vault read access and return current version.
 
-    Reads the current secret, generates a new credential, writes a PENDING
-    version to Vault, updates the target, then promotes the PENDING version
-    to CURRENT.
+    OCI calls this step first. If it fails, rotation does not proceed.
+
+    Object Storage is a write-only reference target and cannot authenticate using
+    the credential it stores, so target connectivity is not verified here.
+    VERIFY_CONNECTION validates that the Function's Resource Principal can
+    read the secret from Vault — the readiness gate this reference target can validate honestly.
 
     Args:
-        secret_id: OCID of the secret to rotate.
-        vault_client: Vault wrapper for read/write operations.
-        target_client: Target system wrapper for credential update.
+        secret_id: OCID of the secret.
+        vault: Vault client.
 
     Returns:
-        The new credential (plaintext). Returned so callers and tests can
-        assert the value without reading back from Vault.
+        Current secret version number.
 
     Raises:
-        oci.exceptions.ServiceError: Vault API call failed. If raised during
-            create_pending (phase 3), state is consistent and rotation can be
-            safely retried. If raised during promote (phase 5), the target
-            already holds the new credential — re-trigger rotation to recover.
-        TargetUpdateError: Target rejected the update (phase 4). A PENDING
-            version exists in Vault but CURRENT is unchanged. Re-triggering
-            rotation creates a fresh PENDING and retries cleanly.
-        RuntimeError: Vault returned an unexpected version state after
-            create_pending_version (phase 3) — indicates a missing
-            rotation_config on the secret.
+        oci.exceptions.ServiceError: On Vault read failure.
     """
-    logger.info("rotation started", extra={"secret_id": secret_id, "phase": "start"})
+    version_no = vault.get_current_version_number(secret_id)
+    logger.info(
+        "VERIFY_CONNECTION succeeded",
+        extra={"secret_id": secret_id, "version_no": version_no},
+    )
+    return version_no
 
-    # Phase 1: Read the current credential from Vault (CURRENT version).
-    # Passed to update_credential so targets that require the current value
-    # to authenticate a change (e.g. ALTER USER ... REPLACE ...) can use it.
-    current_credential = vault_client.get_current_secret_content(secret_id)
-    logger.info("current secret read", extra={"secret_id": secret_id, "phase": "read"})
 
-    # Phase 2: Generate a new credential.
+def create_pending_version(secret_id: str, vault: VaultClient) -> int:
+    """CREATE_PENDING_VERSION: create a PENDING secret version, or reuse one.
+
+    Idempotent: if a PENDING version already exists it is returned without
+    generating a new credential. This ensures OCI retries converge on the
+    same version rather than accumulating orphaned credentials.
+
+    Args:
+        secret_id: OCID of the secret.
+        vault: Vault client.
+
+    Returns:
+        Version number of the PENDING version (existing or newly created).
+
+    Raises:
+        oci.exceptions.ServiceError: On Vault read or write failure.
+        RuntimeError: If the newly created version is not in PENDING stage.
+    """
+    existing = vault.get_pending_secret(secret_id)
+    if existing is not None:
+        version_no, _ = existing
+        logger.info(
+            "reusing existing PENDING version",
+            extra={"secret_id": secret_id, "version_no": version_no},
+        )
+        return version_no
+
     new_credential = secrets.token_hex(_CREDENTIAL_BYTE_LENGTH)
-
-    # Phase 3: Write the new credential to Vault as a PENDING version.
-    # If this raises, neither the target nor CURRENT has been touched — safe
-    # to retry. OCI demotes any existing PENDING to DEPRECATED on a new write,
-    # so retries are idempotent.
+    version_no = vault.create_pending_version(secret_id, new_credential)
     logger.info(
-        "creating pending vault version",
-        extra={"secret_id": secret_id, "phase": "vault_pending"},
+        "CREATE_PENDING_VERSION succeeded",
+        extra={"secret_id": secret_id, "version_no": version_no},
     )
-    try:
-        pending_version = vault_client.create_pending_version(secret_id, new_credential)
-    except (ServiceError, RuntimeError):
-        logger.error(
-            "vault pending write failed or returned unexpected version state — "
-            "target unchanged, state is consistent, safe to retry",
-            extra={"secret_id": secret_id, "phase": "vault_pending_failed"},
+    return version_no
+
+
+def update_target_system(
+    secret_id: str,
+    vault: VaultClient,
+    target: TargetClient,
+) -> int:
+    """UPDATE_TARGET_SYSTEM: push the PENDING credential to the target system.
+
+    Reads the PENDING version content from Vault at call time so no secret
+    material passes through the OCI step payload. The current credential is
+    also read from Vault for targets that require it to authenticate the
+    change (e.g. ALTER USER ... REPLACE ...). ObjectStorageTargetClient
+    ignores current_value and overwrites unconditionally.
+
+    Args:
+        secret_id: OCID of the secret.
+        vault: Vault client.
+        target: Target system client.
+
+    Returns:
+        Version number of the PENDING version that was pushed to the target.
+
+    Raises:
+        RuntimeError: If no PENDING version exists in Vault. This indicates
+            CREATE_PENDING_VERSION did not run or did not succeed.
+        oci.exceptions.ServiceError: On Vault read failure.
+        TargetUpdateError: If the target rejects the credential update.
+    """
+    pending = vault.get_pending_secret(secret_id)
+    if pending is None:
+        raise RuntimeError(
+            f"UPDATE_TARGET_SYSTEM: no PENDING version found for secret {secret_id}; "
+            "CREATE_PENDING_VERSION must succeed before this step"
         )
-        raise
-
-    # Phase 4: Push the new credential to the target.
-    # If this raises, PENDING exists in Vault but CURRENT still holds the old
-    # credential, so the target is consistent with CURRENT. Re-triggering
-    # rotation creates a new PENDING (demoting the orphan) and retries cleanly.
+    version_no, new_credential = pending
+    current_credential = vault.get_current_secret_content(secret_id)
+    target.update_credential(new_credential, current_credential)
     logger.info(
-        "updating target",
-        extra={"secret_id": secret_id, "phase": "target_update"},
+        "UPDATE_TARGET_SYSTEM succeeded",
+        extra={"secret_id": secret_id, "version_no": version_no},
     )
-    try:
-        target_client.update_credential(new_credential, current_credential)
-    except TargetUpdateError:
-        logger.error(
-            "target update failed — vault has orphaned PENDING version, "
-            "CURRENT unchanged. Re-trigger rotation to recover.",
-            extra={"secret_id": secret_id, "phase": "target_update_failed"},
+    return version_no
+
+
+def promote_pending_version(
+    secret_id: str,
+    version_no: int,
+    vault: VaultClient,
+) -> int:
+    """PROMOTE_PENDING_VERSION: promote the given version to CURRENT.
+
+    Three-way stage check:
+      CURRENT → already promoted, return success (retry convergence).
+      PENDING → promote via vault.promote_to_current().
+      other   → RuntimeError; version is in an unexpected stage
+                (DEPRECATED, PREVIOUS, etc.) — fail loudly rather than
+                attempt a promote that would silently misbehave.
+
+    Args:
+        secret_id: OCID of the secret.
+        version_no: Version number to promote. Supplied by OCI in the step
+            payload; must match the version created in CREATE_PENDING_VERSION.
+        vault: Vault client.
+
+    Returns:
+        version_no (unchanged).
+
+    Raises:
+        oci.exceptions.ServiceError: On Vault read or promote failure.
+        RuntimeError: If version_no is in an unexpected stage.
+    """
+    stages = vault.get_secret_version_stages(secret_id, version_no)
+
+    if "CURRENT" in stages:
+        logger.info(
+            "version already CURRENT, promotion already done",
+            extra={"secret_id": secret_id, "version_no": version_no},
         )
-        raise
+        return version_no
 
-    logger.info(
-        "target updated, promoting vault version to current",
-        extra={"secret_id": secret_id, "phase": "vault_promote"},
-    )
-
-    # Phase 5: Promote the PENDING version to CURRENT.
-    # If this raises, the target already holds the new credential but Vault
-    # CURRENT still reflects the old one. Re-triggering rotation recovers:
-    # the target accepts the overwrite and the promote is retried.
-    try:
-        vault_client.promote_to_current(secret_id, pending_version)
-    except ServiceError:
-        logger.error(
-            "vault promote failed after target update — INCONSISTENT STATE: "
-            "target holds new credential, vault CURRENT holds old. "
-            "Re-trigger rotation to recover.",
-            extra={"secret_id": secret_id, "phase": "vault_promote_failed"},
+    if "PENDING" not in stages:
+        raise RuntimeError(
+            f"PROMOTE_PENDING_VERSION: version {version_no} has unexpected stages "
+            f"{stages} for secret {secret_id}; expected PENDING or CURRENT"
         )
-        raise
 
+    vault.promote_to_current(secret_id, version_no)
     logger.info(
-        "rotation complete",
-        extra={"secret_id": secret_id, "phase": "complete"},
+        "PROMOTE_PENDING_VERSION succeeded",
+        extra={"secret_id": secret_id, "version_no": version_no},
     )
-    return new_credential
+    return version_no

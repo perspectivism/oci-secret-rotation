@@ -10,7 +10,7 @@ to drive the rotation schedule, OCI Functions for target-specific rotation logic
 Resource Principal authentication so deployed resources do not store long-lived API keys.
 
 The reference target is Object Storage, but the design is intentionally extensible:
-the target-specific implementation is isolated in `target_client.py`, making it the
+the target-specific implementation is isolated primarily in `target_client.py`, making it the
 primary change point for adapting the pattern to databases, API tokens, service
 credentials, or other systems that need controlled secret lifecycle management.
 The goal is to demonstrate a rotation workflow that is automated, auditable, and
@@ -27,7 +27,7 @@ graph TD
     OS["Object Storage Bucket<br/>(rotation target)"]
     LG["OCI Logging"]
     ONS["ONS Topic<br/>(email)"]
-    DG["IAM Dynamic Group<br/>+ Policies"]
+    DG["IAM Dynamic Groups<br/>+ Policies"]
 
     VS -- "invokes on schedule" --> FN
     FN -- "writes new credential" --> OS
@@ -86,7 +86,6 @@ cp infra/terraform.tfvars.example infra/terraform.tfvars
 
 - `tenancy_ocid`, `user_ocid`, `region`, `compartment_ocid`, `notification_endpoint`
 - `secret_name`, `rotation_interval_days`, `ocir_repo`, and `image_tag` have defaults — leave or adjust
-- Leave `function_ocid` as `""` for now
 
 ### 4. Build and push the Function image
 
@@ -104,32 +103,29 @@ terraform init -backend-config=backend.hcl
 terraform apply
 ```
 
-After apply completes, extract the Function OCID and update `terraform.tfvars`:
-
-```bash
-terraform output -raw function_id  # prints the function_ocid
-```
-
-Paste the printed OCID as the value of `function_ocid` in `terraform.tfvars`, then:
-
-```bash
-terraform apply                    # wires rotation_config to the vault secret
-```
+A single apply creates all resources — the Function, Vault secret, and `rotation_config` scheduler are wired together in one pass.
 
 ### 6. Trigger a rotation
 
 ```bash
 cd ..  # back to repo root
 source scripts/set-env.sh  # once per shell session after terraform apply
-oci fn function invoke \
-  --function-id $FUNCTION_ID \
-  --body "" \
-  --file "-"
 ```
 
-A successful rotation returns `{"status": "ok", ...}`. Structured logs appear in OCI Logging and a notification email is sent to the address configured in `terraform.tfvars`.
+Trigger rotation and monitor until complete (Ctrl-C to exit once `SUCCEEDED` appears):
 
-> **First invocation:** OCI Functions pulls the container image and initializes the execution environment on the first call (cold start). This can take anywhere from a few seconds to over a minute depending on image size — the function is configured with a 120s timeout to allow for cold starts, but expect a delay. Subsequent invocations reuse the warm container and are much faster.
+```bash
+WORK_REQUEST_ID=$(oci vault secret rotate \
+  --secret-id "$SECRET_ID" \
+  --query '"opc-work-request-id"' \
+  --raw-output)
+
+watch -n 10 "oci work-requests work-request get \
+  --work-request-id \"$WORK_REQUEST_ID\" \
+  --query 'data.{\"status\":\"status\",\"percent-complete\":\"percent-complete\"}'"
+```
+
+`status: SUCCEEDED` and `percent-complete: 100.0` confirm all four rotation steps completed. `status: FAILED` means at least one step failed. See [runbook §1](docs/runbook.md#1-trigger-secret-rotation-manually) for how to verify the rotation result and investigate failures.
 
 ---
 
@@ -180,4 +176,4 @@ oci-secret-rotation/
 
 ---
 
-*This is a reference implementation, not a production deployment. See [§10 — Future Work](docs/design.md#10-future-work) for known limitations and future work.*
+*This is a reference implementation, not a turnkey production deployment. See [§10 — Future Work](docs/design.md#10-future-work) for known limitations.*

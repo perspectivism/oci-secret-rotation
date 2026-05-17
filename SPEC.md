@@ -301,6 +301,7 @@ Thumbs.db
 
 # AI tools
 .codex
+.agents
 ```
 
 ---

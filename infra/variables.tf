@@ -47,11 +47,6 @@ variable "image_tag" {
   default     = "latest"
 }
 
-variable "function_ocid" {
-  description = "OCID of the deployed rotation Function. Set to empty string on the first apply — the function does not exist yet. After the first apply, populate this with 'terraform output function_id' and apply again to wire up the vault rotation schedule."
-  type        = string
-}
-
 variable "notification_endpoint" {
   description = "Email address or HTTPS URL that receives rotation event notifications via the ONS subscription. Must be confirmed via the subscription confirmation email before delivery begins."
   type        = string

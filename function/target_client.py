@@ -1,11 +1,11 @@
 """Target client interface and Object Storage / mock implementations.
 
-ObjectStorageTargetClient is the demo target: it writes the new credential as
-a plain-text object to a private OCI bucket after each rotation, making the
-update immediately observable via console or CLI.
+ObjectStorageTargetClient is the reference target implementation: it writes the
+new credential as a plain-text object to a private OCI bucket after each
+rotation, making the update immediately observable via console or CLI.
 
-In a production deployment, substitute a concrete implementation that calls the
-real target's credential API (e.g. ALTER USER for a database). Only this file
+To adapt for a real target, substitute a concrete implementation that calls the
+target's credential API (e.g. ALTER USER for a database). Only this file
 changes — rotation.py and vault_client.py are target-agnostic.
 """
 
@@ -48,10 +48,16 @@ class TargetClient(abc.ABC):
 class ObjectStorageTargetClient(TargetClient):
     """Writes the rotated credential to a private Object Storage object.
 
-    Serves as a demo target: after each rotation the new credential is
-    immediately readable via `oci os object get` or the OCI console.
-    This is NOT a production pattern — real targets are databases, APIs, or
-    application config stores, not object storage.
+    Reference target implementation: after each rotation the new credential
+    is immediately readable via `oci os object get` or the OCI console,
+    making rotation observable without a real credential-consuming system.
+    Real targets are databases, APIs, or application config stores — replace
+    this class with a concrete implementation for production use.
+
+    Target connectivity verification: Object Storage stores the credential
+    rather than authenticating with it, so there is no meaningful credential
+    round-trip to perform during VERIFY_CONNECTION. See rotation.verify_connection()
+    for the readiness gate this reference target can validate honestly.
 
     Authenticates via Resource Principal (the deployed Function's identity).
     """

@@ -111,14 +111,108 @@ class VaultClient:
         raw = bundle.data.secret_bundle_content.content
         return base64.b64decode(raw).decode()
 
+    def get_current_version_number(self, secret_id: str) -> int:
+        """Return the version number of the CURRENT secret version.
+
+        Args:
+            secret_id: OCID of the secret.
+
+        Returns:
+            Version number of the current secret version.
+
+        Raises:
+            oci.exceptions.ServiceError: On non-2xx response from Vault.
+        """
+        logger.debug(
+            "reading current secret version number", extra={"secret_id": secret_id}
+        )
+        try:
+            bundle = self._secrets.get_secret_bundle(secret_id=secret_id)
+        except ServiceError as exc:
+            logger.error(
+                "failed to read secret bundle",
+                extra={"secret_id": secret_id, "status": exc.status, "code": exc.code},
+            )
+            raise
+        return bundle.data.version_number
+
+    def get_pending_secret(self, secret_id: str) -> tuple[int, str] | None:
+        """Return the version number and plaintext content of the PENDING version.
+
+        Both values come from the same secret bundle response, so callers act
+        on the version number and content returned together by Vault.
+
+        Args:
+            secret_id: OCID of the secret.
+
+        Returns:
+            (version_number, content) tuple if the PENDING-stage lookup
+            succeeds; None if Vault returns 404 for that lookup.
+
+        Raises:
+            oci.exceptions.ServiceError: On non-404 Vault errors.
+        """
+        logger.debug("reading pending secret bundle", extra={"secret_id": secret_id})
+        try:
+            bundle = self._secrets.get_secret_bundle(
+                secret_id=secret_id,
+                stage="PENDING",
+            )
+        except ServiceError as exc:
+            if exc.status == 404:
+                return None
+            logger.error(
+                "failed to read pending secret bundle",
+                extra={"secret_id": secret_id, "status": exc.status, "code": exc.code},
+            )
+            raise
+        version_no = bundle.data.version_number
+        raw = bundle.data.secret_bundle_content.content
+        return version_no, base64.b64decode(raw).decode()
+
+    def get_secret_version_stages(
+        self, secret_id: str, version_number: int
+    ) -> list[str]:
+        """Return the lifecycle stages of a specific secret version.
+
+        Args:
+            secret_id: OCID of the secret.
+            version_number: Version number to inspect.
+
+        Returns:
+            List of stage strings, e.g. ["PENDING", "LATEST"].
+
+        Raises:
+            oci.exceptions.ServiceError: On non-2xx response from Vault.
+        """
+        try:
+            version = self._vaults.get_secret_version(
+                secret_id=secret_id,
+                secret_version_number=version_number,
+            ).data
+        except ServiceError as exc:
+            logger.error(
+                "failed to retrieve secret version stages",
+                extra={
+                    "secret_id": secret_id,
+                    "version_number": version_number,
+                    "status": exc.status,
+                    "code": exc.code,
+                },
+            )
+            raise
+        return list(version.stages or [])
+
     def create_pending_version(self, secret_id: str, new_content: str) -> int:
         """Create a new PENDING secret version with the given content.
 
-        OCI Vault automatically moves any existing PENDING version to
-        DEPRECATED when a new one is created (empirically verified) — so this is safe to call on
-        retry after a previous partial rotation. Raises RuntimeError if the
-        new version is not PENDING — the stage is set explicitly, so this
-        would indicate an unexpected OCI API behavior.
+        The higher-level rotation step checks for an existing PENDING version
+        before calling this method so retries reuse the same credential. If
+        this method is called directly while a PENDING version exists, OCI
+        demotes the older PENDING version to DEPRECATED when creating the new
+        one (empirically verified). Raises RuntimeError if the new version is
+        not PENDING — the stage is set explicitly, so this would indicate an
+        unexpected OCI API behavior.
 
         Args:
             secret_id: OCID of the secret to update.

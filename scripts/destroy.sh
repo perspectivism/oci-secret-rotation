@@ -5,8 +5,8 @@
 #   bash scripts/destroy.sh
 #
 # Prerequisites: OCI CLI configured (~/.oci/config), terraform init completed,
-# and scripts/set-env.sh sourced (or SECRET_OCID / FUNCTION_ID / VAULT_ID /
-# COMPARTMENT_OCID / NAMESPACE / BUCKET_NAME already set in the environment).
+# and scripts/set-env.sh sourced (or SECRET_ID / FUNCTION_ID / VAULT_ID /
+# COMPARTMENT_ID / NAMESPACE / BUCKET_NAME already set in the environment).
 #
 # Steps performed:
 #   1. Prepare and schedule secret deletion (disable auto-rotation, schedule 2-day
@@ -22,7 +22,7 @@ set -euo pipefail
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infra" && pwd)"
 
 # Populate environment variables from Terraform outputs if not already set.
-if [[ -z "${SECRET_OCID:-}" ]]; then
+if [[ -z "${SECRET_ID:-}" ]]; then
   echo "Sourcing environment from Terraform outputs..."
   # shellcheck source=scripts/set-env.sh
   source "$(dirname "${BASH_SOURCE[0]}")/set-env.sh"
@@ -38,7 +38,7 @@ if [[ -z "${FUNCTION_ID:-}" ]]; then
 else
   echo "Disabling auto-rotation..."
   oci vault secret update \
-    --secret-id "$SECRET_OCID" \
+    --secret-id "$SECRET_ID" \
     --rotation-config "{\"isScheduledRotationEnabled\": false, \"rotationInterval\": \"P30D\", \"targetSystemDetails\": {\"targetSystemType\": \"FUNCTION\", \"functionId\": \"$FUNCTION_ID\"}}"
   echo "Auto-rotation disabled."
 fi
@@ -50,7 +50,7 @@ fi
 # secret is permanently deleted ~48 hours later.
 echo "Scheduling secret for deletion (2-day retention window)..."
 oci vault secret schedule-secret-deletion \
-  --secret-id "$SECRET_OCID" \
+  --secret-id "$SECRET_ID" \
   --time-of-deletion "$(date -u -d '+2 days' +%Y-%m-%dT%H:%M:%S.000Z)"
 echo "Secret scheduled for deletion — permanently removed in ~48 hours."
 
@@ -84,7 +84,7 @@ echo ""
 echo "=== Step 3: Delete OCIR container repository ==="
 OCIR_REPO=$(grep "^ocir_repo" "$INFRA_DIR/terraform.tfvars" | head -1 | cut -d'"' -f2)
 REPO_ID=$(oci artifacts container repository list \
-  --compartment-id "$COMPARTMENT_OCID" \
+  --compartment-id "$COMPARTMENT_ID" \
   --display-name "$OCIR_REPO" \
   --query 'data.items[0].id' \
   --raw-output 2>/dev/null)

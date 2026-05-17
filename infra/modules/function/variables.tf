@@ -8,11 +8,6 @@ variable "subnet_id" {
   type        = string
 }
 
-variable "secret_id" {
-  description = "OCID of the Vault secret the function will rotate. Injected as SECRET_OCID in the function application config map."
-  type        = string
-}
-
 variable "log_group_id" {
   description = "OCID of the log group to write function invocation service logs into. Sourced from the logging module."
   type        = string

@@ -21,7 +21,7 @@ variable "secret_name" {
 }
 
 variable "function_ocid" {
-  description = "OCID of the rotation Function. Empty string on the first apply — rotation_config is omitted until a real OCID is provided."
+  description = "OCID of the rotation Function. Wired from the function module output — used to configure the rotation_config scheduler on the secret."
   type        = string
 }
 
@@ -30,6 +30,3 @@ variable "rotation_interval_days" {
   type        = number
   default     = 30
 }
-
-
-

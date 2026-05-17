@@ -17,7 +17,7 @@ _tf_outputs=$(cd "$INFRA_DIR" && terraform output -json)
 
 _get() { printf '%s' "$_tf_outputs" | jq -r ".$1.value"; }
 
-export SECRET_OCID=$(               _get secret_id)
+export SECRET_ID=$(                 _get secret_id)
 export FUNCTION_ID=$(               _get function_id)
 export VAULT_ID=$(                  _get vault_id)
 export MASTER_KEY_ID=$(             _get master_key_id)
@@ -27,12 +27,12 @@ export NOTIFICATION_TOPIC_ID=$(     _get notification_topic_id)
 export BUCKET_NAME=$(               _get bucket_name)
 export OBJECT_NAME=$(               _get object_name)
 export NAMESPACE=$(                 _get namespace)
-export COMPARTMENT_OCID=$(          _get compartment_id)
+export COMPARTMENT_ID=$(            _get compartment_id)
 export IMAGE_URL=$(                 _get image_url)
 export REGION=$(                    _get region)
 
 echo "Environment ready. Variables set:"
-echo "  SECRET_OCID                = $SECRET_OCID"
+echo "  SECRET_ID                  = $SECRET_ID"
 echo "  FUNCTION_ID                = $FUNCTION_ID"
 echo "  VAULT_ID                   = $VAULT_ID"
 echo "  MASTER_KEY_ID              = $MASTER_KEY_ID"
@@ -42,6 +42,6 @@ echo "  NOTIFICATION_TOPIC_ID      = $NOTIFICATION_TOPIC_ID"
 echo "  BUCKET_NAME                = $BUCKET_NAME"
 echo "  OBJECT_NAME                = $OBJECT_NAME"
 echo "  NAMESPACE                  = $NAMESPACE"
-echo "  COMPARTMENT_OCID           = $COMPARTMENT_OCID"
+echo "  COMPARTMENT_ID             = $COMPARTMENT_ID"
 echo "  IMAGE_URL                  = $IMAGE_URL"
 echo "  REGION                     = $REGION"

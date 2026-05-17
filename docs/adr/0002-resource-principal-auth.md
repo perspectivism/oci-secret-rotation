@@ -1,11 +1,11 @@
 # ADR 0002: Use Resource Principal for Function Authentication
 
 **Status:** Accepted
-**Date:** 2026-04-22
+**Date:** 2026-05-16
 
 ## Context
 
-The rotation Function must authenticate to OCI APIs at runtime — reading the current secret from Vault, writing a new version, putting the credential to Object Storage, and publishing a notification to ONS. Every one of these calls requires a signed OCI identity.
+The rotation Function must authenticate to OCI APIs at runtime — reading secret versions from Vault, creating and promoting versions, writing the credential to Object Storage, and publishing a notification to ONS. Every one of these calls requires a signed OCI identity.
 
 Three options were evaluated:
 
@@ -40,7 +40,7 @@ Using `ALL{}` with both conditions is intentional: the Function must be both the
 
 **Harder:**
 - Requires correct dynamic group configuration before any API call will succeed. A misconfigured matching rule causes silent `401` authentication failures that can be difficult to distinguish from permission errors
-- If the Function resource is destroyed and recreated (new OCID), the dynamic group matching rule and the `function_ocid` Terraform variable must both be updated before the replacement Function can authenticate
+- If the Function resource is destroyed and recreated (new OCID), Terraform must update the dynamic group matching rule before the replacement Function can authenticate
 - Local development and unit tests cannot use Resource Principal. `VaultClient` accepts an explicit `signer` argument specifically to allow injection of a config-file signer or mock signer during testing
 
 ## Alternatives Considered

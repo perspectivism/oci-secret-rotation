@@ -1,7 +1,7 @@
 # OCI Secret Lifecycle Service — Design Document
 
 **Status:** Accepted
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-16
 
 ---
 
@@ -28,7 +28,7 @@ Rotation is operationally hard to do well. Done manually it is error-prone and s
 
 This system demonstrates the canonical OCI pattern for doing exactly that: OCI Vault's native rotation scheduling triggers a customer-owned Function that performs the actual credential change. The Function is authenticated via Resource Principal — it carries no API keys, no passwords, no credentials of its own. IAM policy grants it exactly the permissions it needs and nothing more.
 
-The result is a rotation system that is auditable (the Function emits structured logs for each rotation phase to OCI Logging), recoverable (Vault retains previous secret versions for rollback), and operationally simple (rotation runs on a schedule without human intervention).
+The result is a rotation system that is auditable (the Function emits structured logs for each rotation step to OCI Logging), recoverable (Vault retains previous secret versions for rollback), and operationally simple (rotation runs on a schedule without human intervention).
 
 ---
 
@@ -48,7 +48,7 @@ The result is a rotation system that is auditable (the Function emits structured
 - Admin UI or web endpoint
 - Multi-tenant isolation (single compartment is sufficient for a reference implementation)
 - Exhaustive test coverage (smoke tests and key unit tests only)
-- Real production target system (Object Storage demo target is sufficient to demonstrate the pattern)
+- Real production target system (Object Storage reference target is sufficient to demonstrate the pattern)
 
 ---
 
@@ -69,7 +69,7 @@ graph TD
             FNA --> FN
         end
 
-        MT["Object Storage bucket<br/>(demo rotation target)"]
+        MT["Object Storage bucket<br/>(reference rotation target)"]
 
         subgraph obs["Observability"]
             LG["OCI Logging"]
@@ -78,7 +78,7 @@ graph TD
 
         SEC -- "invokes on rotation schedule" --> FN
         FN -- "reads/writes secret versions" --> SEC
-        FN -- "updates demo credential" --> MT
+        FN -- "updates credential" --> MT
         FN -- "emits structured logs" --> LG
         FN -- "publishes success notification" --> NT
     end
@@ -90,9 +90,9 @@ IAM authorization is shown separately in [§7 — Security Model](#7-security-mo
 
 **OCI Vault + KMS key.** The Vault holds the secret and its version history. A customer-managed KMS master key encrypts secret material at rest. The secret resource carries a `rotation_config` that specifies the rotation interval and the target Function OCID — this is what drives the schedule without any custom cron infrastructure.
 
-**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler. It reads the current secret, generates a new credential, writes a `PENDING` version to Vault, updates the Object Storage target, then promotes the `PENDING` version to `CURRENT`. It authenticates to OCI APIs using Resource Principal. The Function is included in a narrowly scoped dynamic group by matching its OCID; OCI then issues temporary resource principal credentials to the runtime, so no user API key or static credential is stored on the Function. The Function application runs in a private subnet in the project VCN and reaches OCI services through a service gateway; the rotation handler is invoked through the OCI Functions API, with access authorized by IAM, not through a public HTTP endpoint.
+**OCI Function (rotation handler).** A Python 3.12 function invoked by the Vault rotation scheduler via a four-step protocol: `VERIFY_CONNECTION` confirms the Function can read the secret from Vault; `CREATE_PENDING_VERSION` generates a new credential and creates a `PENDING` Vault version; `UPDATE_TARGET_SYSTEM` reads the `PENDING` credential from Vault and writes it to the Object Storage reference target; `PROMOTE_PENDING_VERSION` promotes the `PENDING` version to `CURRENT` and publishes an ONS notification. Each step is a separate Function invocation; OCI orchestrates the sequence and handles retries. The Function authenticates to OCI APIs using Resource Principal. The Function is included in a narrowly scoped dynamic group by matching its OCID; OCI then issues temporary resource principal credentials to the runtime, so no user API key or static credential is stored on the Function. The Function application runs in a private subnet in the project VCN and reaches OCI services through a service gateway; the rotation handler is invoked through the OCI Functions API, with access authorized by IAM, not through a public HTTP endpoint.
 
-**Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
+**Object Storage rotation target.** A private OCI Object Storage bucket that receives the new credential value on every rotation. The Function writes the credential as a named object in the bucket (`put_object`), making the result immediately observable via `oci os object get` or the Console. In a production deployment this is replaced by a call to the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for a third-party service. Target-specific behaviour is isolated primarily to `target_client.py`; real integrations may also add target verification or idempotency hooks while preserving the same four-step protocol.
 
 **IAM dynamic groups + policies.** Two dynamic groups govern rotation. The first matches the specific Function OCID and is granted permission to manage the secret, write to the target bucket, and publish to ONS topics in the compartment (`PublishMessage` only). The second matches the specific Vault Secret OCID and is granted compartment-scoped `read fn-function` plus Function-OCID-scoped `use fn-invocation` so the Vault Secret's Resource Principal can invoke only the target Function — this is the documented OCI pattern for secret rotation, where the secret resource itself holds a Resource Principal identity rather than relying on a broad service principal. All policy statements are compartment-scoped.
 
@@ -102,33 +102,68 @@ IAM authorization is shown separately in [§7 — Security Model](#7-security-mo
 
 ## 4. Rotation Flow
 
+OCI's native rotation protocol invokes the Function four times — once per step — with each invocation receiving a distinct payload and returning a `SecretRotationOutput` response:
+
+| Step | Responsibility |
+|---|---|
+| `VERIFY_CONNECTION` | Confirm rotation readiness. OCI defines this as target verification; for the Object Storage reference target, the Function validates Vault read access because Object Storage stores rather than consumes the credential. |
+| `CREATE_PENDING_VERSION` | Create or reuse a `PENDING` secret version with a newly generated credential. |
+| `UPDATE_TARGET_SYSTEM` | Read the `PENDING` credential from Vault and apply it to the target. |
+| `PROMOTE_PENDING_VERSION` | Promote the `PENDING` version to `CURRENT` and publish a rotation notification. |
+
+The sequence below shows the first-attempt happy path through OCI's four native rotation steps; retry behaviour is described afterward.
+
 ```mermaid
 sequenceDiagram
-    participant VS as OCI Vault Scheduler
+    participant OCI as OCI Vault Scheduler
     participant FN as Rotation Function
     participant VW as Vault
-    participant OS as Object Storage Target
+    participant OS as Object Storage
     participant ONS as ONS Topic
-    participant LG as OCI Logging
 
-    VS->>FN: invoke (rotation trigger)
-    FN->>VW: get_secret_bundle (read CURRENT version)
-    VW-->>FN: current credential value
+    Note over OCI,FN: Step 1 — VERIFY_CONNECTION
+    OCI->>FN: invoke(secretId, step=VERIFY_CONNECTION)
+    FN->>VW: get_secret_bundle(stage=CURRENT)
+    VW-->>FN: version number N
+    FN-->>OCI: {responseCode: 200, versionNo: N}
+
+    Note over OCI,FN: Step 2 — CREATE_PENDING_VERSION
+    OCI->>FN: invoke(secretId, step=CREATE_PENDING_VERSION)
+    FN->>VW: get_secret_bundle(stage=PENDING) — check for existing
+    VW-->>FN: no PENDING version (nothing to reuse)
     FN->>FN: generate new credential
-    FN->>VW: update_secret (content=<new credential>, stage=PENDING)
-    VW-->>FN: PENDING version created
-    FN->>VW: list_secret_versions (find version with both LATEST and PENDING stages)
-    VW-->>FN: pending version number
-    FN->>OS: put_object (content=<new credential>)
-    OS-->>FN: credential written
-    FN->>VW: update_secret (current_version_number=<pending version number>)
-    VW-->>FN: version promoted to CURRENT
-    FN--)LG: structured logs for each rotation phase
-    FN--)ONS: publish_message (rotation complete)
-    Note over VW: The old CURRENT version becomes PREVIOUS (retained for rollback)
+    FN->>VW: update_secret(content=new credential, stage=PENDING)
+    VW-->>FN: version N+1 in PENDING stage
+    FN-->>OCI: {responseCode: 200, versionNo: N+1}
+
+    Note over OCI,FN: Step 3 — UPDATE_TARGET_SYSTEM
+    OCI->>FN: invoke(secretId, step=UPDATE_TARGET_SYSTEM, versionNo=N+1)
+    FN->>VW: get_secret_bundle(stage=PENDING) — read credential from Vault
+    VW-->>FN: pending credential value
+    FN->>OS: put_object(new credential)
+    OS-->>FN: written
+    FN-->>OCI: {responseCode: 200, versionNo: N+1}
+
+    Note over OCI,FN: Step 4 — PROMOTE_PENDING_VERSION
+    OCI->>FN: invoke(secretId, step=PROMOTE_PENDING_VERSION, versionNo=N+1)
+    FN->>VW: get_secret_version(N+1) — verify stage
+    VW-->>FN: stages=[PENDING, LATEST]
+    FN->>VW: update_secret(current_version_number=N+1)
+    VW-->>FN: version N+1 promoted to CURRENT
+    FN--)ONS: publish_message(secretId, versionNo=N+1)
+    FN-->>OCI: {responseCode: 200, versionNo: N+1}
+
+    Note over VW: Former CURRENT (version N) becomes PREVIOUS — retained for rollback
 ```
 
-**Failure handling** is covered in detail in [ADR 0003](adr/0003-rotation-state-machine.md). Three partial-failure cases exist: (1) `create_pending_version()` fails — target untouched, state consistent, safe to retry; (2) `update_credential()` fails after the `PENDING` version is created — `CURRENT` unchanged, target still consistent with `CURRENT`, re-trigger creates a fresh `PENDING` version; (3) `promote_to_current()` fails after target update — target holds the new credential but `CURRENT` still reflects the old one; for this Object Storage demonstration target, re-triggering recovers by overwriting the target and promoting a fresh Vault version, but real targets that require the current credential to authenticate the update may need target-specific break-glass recovery.
+**Failure handling and retry behaviour.** OCI retries each step independently on failure. The Function is designed to converge safely under retries at each step:
+
+- **VERIFY_CONNECTION** is read-only and safe to retry at any time. This step validates Vault read access only — the Object Storage reference target stores the credential rather than authenticating with it, so target connectivity cannot be verified honestly here.
+- **CREATE_PENDING_VERSION** is idempotent: if a `PENDING` version already exists when OCI retries, the Function reuses it without generating a new credential. A new credential is generated only when no `PENDING` version exists.
+- **UPDATE_TARGET_SYSTEM** reads the `PENDING` credential from Vault at call time rather than from the OCI step payload. For this Object Storage reference target, `put_object` overwrites unconditionally — retries are safe. Real targets that authenticate the credential change using the current credential may need target-specific idempotency handling.
+- **PROMOTE_PENDING_VERSION** applies a three-way convergence check: if the version is already `CURRENT` (a previous retry succeeded), the step returns success without re-promoting. If `PENDING`, it promotes. Any other stage raises an error rather than attempting a promotion that could silently misbehave.
+
+See [ADR 0003](adr/0003-rotation-state-machine.md) for the full state diagram and failure recovery paths.
 
 ---
 
@@ -154,11 +189,11 @@ CMK rotation is separate from secret credential rotation: rotating the CMK creat
 
 Multi-compartment separation (e.g., separating the Vault from the Function) adds policy complexity without demonstrating additional patterns. A single compartment is sufficient for a reference implementation. Cross-compartment patterns are documented as future work in [§10 — Future Work](#10-future-work).
 
-### Demo rotation target (Object Storage)
+### Reference rotation target (Object Storage)
 
 Rotating against a real database or third-party API introduces external dependencies, costs, and setup complexity that distract from the pattern being demonstrated. Instead, the Function writes the new credential value to a private OCI Object Storage object after each rotation. This makes the result immediately observable (`oci os object get` or the console) without requiring an external system.
 
-> **This is not a production pattern.** Writing credential values to Object Storage defeats the purpose of Vault as a secrets store. In a real deployment, `target_client.py` is replaced with an implementation that calls the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for an external service. Only `target_client.py` changes; `rotation.py` and `vault_client.py` are target-agnostic.
+> **This is not a production pattern.** Writing credential values to Object Storage defeats the purpose of Vault as a secrets store. In a real deployment, `target_client.py` is replaced with an implementation that calls the actual target's credential API — for example, `ALTER USER ... IDENTIFIED BY` for a database, or a vendor key-rotation endpoint for an external service. Target-specific behaviour is isolated primarily to `target_client.py`; real integrations may also add target verification or idempotency hooks while preserving the same four-step protocol.
 
 ---
 
@@ -238,7 +273,7 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 
 **Rotation cadence tradeoffs.** More frequent rotation reduces the window of exposure for a compromised credential but increases the operational load on the target system and the risk of a partial-rotation window (the period between the target being updated and Vault confirming the new version). For most use cases, 30–90 day intervals balance risk reduction against operational noise.
 
-**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to `CURRENT`, the target holds a new credential while Vault `CURRENT` still reflects the old one. For this Object Storage demonstration target, re-triggering rotation recovers by overwriting the target and promoting a fresh Vault version. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery. The recovery path is documented in the runbook.
+**Blast radius of failure.** If the Function fails after updating the target but before promoting the new Vault version to `CURRENT`, the target holds a new credential while Vault `CURRENT` still reflects the old one. For this Object Storage reference target, retrying the failed step recovers by reusing the existing `PENDING` version, overwriting the target as needed, and then promoting that same version. Real targets that require the current credential to authenticate the update may need target-specific break-glass recovery. The recovery path is documented in the runbook.
 
 **Rollback path.** Previous secret versions are retained in Vault. Rolling back means promoting the previous version to `CURRENT` and re-applying the old credential to the target. The runbook documents the exact steps.
 
@@ -250,5 +285,5 @@ See [docs/threat-model.md](threat-model.md) for the full STRIDE analysis.
 - **Cross-tenancy access.** Secrets shared across tenancies require cross-tenancy IAM policies. The pattern is documented in the OCI IAM docs but is out of scope for this reference.
 - **HSM-backed keys.** Upgrading from `DEFAULT` to `VIRTUAL_PRIVATE` protection mode requires destroying and recreating the KMS key (and therefore the secret). Plan for this before using this pattern with highly sensitive material.
 - **Automatic KMS key rotation.** OCI supports scheduled automatic rotation for KMS keys only in `VIRTUAL_PRIVATE` vaults. For `DEFAULT` vault keys, manual rotation via `oci kms management key-version create` is available (see [runbook §6](runbook.md#6-rotate-the-kms-master-key-manually)). Upgrading to automatic rotation requires migrating to a `VIRTUAL_PRIVATE` vault and choosing an organization-approved cryptoperiod, typically much longer than the secret credential rotation interval. This is separate from secret rotation: KMS key rotation creates a new key version for at-rest encryption, while secret rotation changes the credential value used by the target system.
-- **Real target integrations.** Replacing the Object Storage target with a real database (e.g., using OCI Database's password rotation API) or a third-party secret (e.g., a GitHub PAT) follows the same pattern — only `target_client.py` changes.
+- **Real target integrations.** Replacing the Object Storage target with a real database (e.g., using OCI Database's password rotation API) or a third-party secret (e.g., a GitHub PAT) follows the same pattern — target-specific behaviour is isolated primarily to `target_client.py`; real integrations may also add target verification or idempotency hooks while preserving the same four-step protocol.
 - **CI/CD for Function updates.** A GitHub Actions workflow that builds, pushes, and redeploys the Function on merge to `main` is a natural extension.

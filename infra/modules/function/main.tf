@@ -14,15 +14,14 @@ locals {
 # the same network placement, config, and logging policy.
 # subnet_ids attaches the application to the private subnet created by the
 # network module; all function VNICs are provisioned there.
-# config injects SECRET_OCID so the handler can read the target secret without
-# any hardcoded values in the image.
+# config injects target and notification values. The secret OCID is not injected
+# here — the handler reads it from the invocation payload at runtime.
 resource "oci_functions_application" "rotation" {
   compartment_id = var.compartment_id
   display_name   = "secret-rotation-app"
   subnet_ids     = [var.subnet_id]
 
   config = {
-    SECRET_OCID      = var.secret_id
     TARGET_BUCKET    = var.target_bucket_name
     TARGET_NAMESPACE = var.target_namespace
     TARGET_OBJECT    = var.target_object_name
@@ -40,7 +39,6 @@ resource "oci_functions_function" "rotation" {
   image              = local.image_url
   memory_in_mbs      = 256
   timeout_in_seconds = 120
-
 }
 
 # Service log that captures function invocation events (start, result, duration)

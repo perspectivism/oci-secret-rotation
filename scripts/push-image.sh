@@ -24,7 +24,7 @@ parse_tfvar() {
 REGION=$(parse_tfvar region)
 OCIR_REPO=$(parse_tfvar ocir_repo)
 IMAGE_TAG=$(parse_tfvar image_tag)
-COMPARTMENT_OCID=$(parse_tfvar compartment_ocid)
+COMPARTMENT_ID=$(parse_tfvar compartment_ocid)
 
 if [[ -z "$REGION" ]]; then
   echo "Error: 'region' not set in $TFVARS" >&2
@@ -41,7 +41,7 @@ if [[ -z "$IMAGE_TAG" ]]; then
   exit 1
 fi
 
-if [[ -z "$COMPARTMENT_OCID" ]]; then
+if [[ -z "$COMPARTMENT_ID" ]]; then
   echo "Error: 'compartment_ocid' not set in $TFVARS" >&2
   exit 1
 fi
@@ -54,7 +54,7 @@ echo ""
 
 echo "Creating OCIR repository in target compartment (skipped if already exists)..."
 oci artifacts container repository create \
-  --compartment-id "$COMPARTMENT_OCID" \
+  --compartment-id "$COMPARTMENT_ID" \
   --display-name "$OCIR_REPO" \
   --is-public false 2>/dev/null \
   && echo "Repository created." \
